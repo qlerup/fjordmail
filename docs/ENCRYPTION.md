@@ -50,3 +50,7 @@ Enable HTTPS and COOKIE_SECURE=1 for webmail. Future IMAP/SMTP must require vali
 - [Stalwart key management and client implications](https://www.stalw.art/docs/encryption/manage/)
 - [gocryptfs cryptography](https://nuetzlich.net/gocryptfs/forward_mode_crypto/)
 - [Restic design/encryption](https://restic.readthedocs.io/en/stable/100_references.html)
+
+## Basic mail update
+
+The basic-mail pipeline now requires an actual gocryptfs mount visible inside the app and the same authenticated storage proof readable from PostgreSQL's data directory. Boolean configuration alone cannot activate mail. The helper prepares encrypted storage and preserves phase-1 metadata; see README. Engine UID is 2000 (Stalwart v0.16.24), not the earlier planned UID 1000. Extended backup recovery/cold-boot drills are explicitly deferred, not claimed verified.

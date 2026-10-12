@@ -1,0 +1,12 @@
+import {readFile,writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {env} from './config.js';
+import {seal} from './security.js';
+const mount=env.MAIL_STORAGE_ROOT;
+const lines=await readFile('/proc/self/mountinfo','utf8');
+if(!lines.split('\n').some(line=>line.split(' ')[4]===mount&&line.split(' - ')[1]?.startsWith('fuse.gocryptfs ')))throw Error('Expected actual gocryptfs encrypted filesystem');
+const proof=seal(JSON.stringify({format:1,mountVerified:true,recoveryTested:false,nonce:randomUUID(),checkedAt:new Date().toISOString()}));
+await writeFile(join(mount,'.fjordmail-storage-proof'),proof,{mode:0o644});
+await writeFile(join(mount,'postgres','.fjordmail-storage-proof'),proof,{mode:0o644});
+console.log('Encrypted mount proof written. Full backup recovery drill remains pending.');

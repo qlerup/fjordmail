@@ -43,7 +43,7 @@ test('Phase 1 actual PostgreSQL/API integration',{timeout:30000},async t=>{
   assert.equal((await call('/mailboxes',{session:admin})).data.items.length,0);
   assert.equal((await call('/mailboxes/'+mailbox+'/messages',{session:userB})).status,404);
   assert.equal((await call('/mailboxes/'+mailbox+'/messages',{session:admin})).status,404);
-  assert.equal((await call('/mailboxes/'+mailbox+'/messages',{session:userA})).status,409);
+  assert.equal((await call('/mailboxes/'+mailbox+'/messages',{session:userA})).status,503);
   assert.equal((await call('/admin/mailboxes',{session:userB})).status,403);
  });
  await t.test('shared mailbox assignments and revocation are real',async()=>{

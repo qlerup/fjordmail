@@ -1,0 +1,48 @@
+services:
+  app:
+    environment:
+      MAIL_ENABLED: "1"
+      MAIL_STORAGE_ROOT: /mail-storage
+      STALWART_URL: http://engine:8080
+      STALWART_ADMIN_PASSWORD: ${STALWART_ADMIN_PASSWORD:?Generate a distinct engine password}
+      RESEND_DOWNLOAD_HOSTS: ${RESEND_DOWNLOAD_HOSTS:-inbound-cdn.resend.com,cdn.resend.app}
+    volumes:
+      - type: bind
+        source: ${DATA_DIR:?Choose verified encrypted DATA_DIR}
+        target: /mail-storage
+        bind:
+          create_host_path: false
+    networks: [default, database, mail]
+  engine:
+    image: stalwartlabs/stalwart:v0.16.24
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      STALWART_RECOVERY_ADMIN: admin:${STALWART_ADMIN_PASSWORD:?Generate engine password}
+    volumes:
+      - ${DATA_DIR:?Encrypted DATA_DIR}/engine-config:/etc/stalwart
+      - ${DATA_DIR:?Encrypted DATA_DIR}/engine-data:/var/lib/stalwart
+    networks: [mail]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /var/log/stalwart:rw,noexec,nosuid,size=16m
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}
+  scanner:
+    image: clamav/clamav:1.4
+    restart: unless-stopped
+    networks: [mail, default]
+    volumes:
+      - ${DATA_DIR:?Encrypted DATA_DIR}/clamav:/var/lib/clamav
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}
+networks:
+  mail:
+    internal: true

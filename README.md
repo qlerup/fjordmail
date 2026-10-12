@@ -1,10 +1,32 @@
 # FjordMail
 
-Self-hosted FjordHub mail app. **Version 0.1.0 delivers phase 1** of the supplied development plan. AI is deferred.
+Self-hosted FjordHub mail app. **Version 0.2.0 adds basic real sending and receiving.** AI is deferred.
 
 Working now: PostgreSQL migrations, FjordHub login/SSO/first-login confirmation, standalone fallback, persistent personal/shared mailbox metadata and assignments, admin/user boundaries, encrypted Resend configuration, a real domain connectivity test, audit records and a responsive React/TypeScript UI with saved appearance preferences. The complete branded asset package is in `branding/FjordMail-brand-package.zip`.
 
-**Mail receiving/sending, draft/message storage, IMAP/SMTP, attachments, mail search, notifications and AI are not yet enabled.** The UI and API explicitly report this. The app contains no demo emails. The receiving endpoint returns 503 and must not be registered with Resend yet. Phase 2 has an encrypted-storage release gate. This foundation is not presented as a fully operational production mail server.
+Working basic mail: a text composer, Resend sending, canonical Sent/Inbox in Stalwart, a text reader, signed optional webhooks, automatic receiving API polling every 30 seconds, persistent encrypted jobs with leases/retries and import deduplication. Receiving MIME is scanned with ClamAV before import. Mail access requires explicit mailbox membership; administrative status never grants implicit reading.
+
+**Draft autosave, reply/forward, attachment upload/download, organizing/search, IMAP/SMTP, notifications and AI remain future work.** Received attachments stay in the original MIME but cannot yet be opened in the UI. This is the limited basic-mail release requested for tonight.
+
+The live round trip passed against Resend using one email from `test@gleruphub.dk` to itself in an isolated deployment with actual encrypted storage. The extended encrypted-backup recovery drill is deferred at the user's request.
+
+## Enable basic mail after updating FjordHub
+
+Updating code alone does not configure encrypted storage. Mail stays paused until a verified gocryptfs mount protects PostgreSQL and Stalwart. For an existing phase-1 installation on a Linux Docker host with gocryptfs, FUSE, Python 3 and systemd, run as root:
+
+```bash
+bash /opt/fjordhub/apps/fjordmail/scripts/enable-basic-mail.sh \
+  /opt/fjordhub/apps/fjordmail \
+  /opt/fjordhub/data/apps/fjordmail-cipher \
+  /opt/fjordhub/data/apps/fjordmail-secure \
+  /opt/fjordhub/keys/fjordmail-storage.key
+```
+
+Adjust paths for a nonstandard installation. The helper refuses existing target contents, retains old database data, saves an encrypted logical backup, preserves APP_ENCRYPTION_KEY, and migrates metadata to the new encrypted store. It briefly stops FjordMail only. It prepares engine/scanner services and boot ordering so mail starts after the encrypted mount. Proxmox LXC needs persistent FUSE support. Failed setup restores the old environment and data location. The helper is syntax-checked; a full deployment/cold-boot/recovery drill is not claimed complete.
+
+Then open **Administration → Resend**, test the saved API key, and **Maildrift → Aktivér mailbehandling**. New mail is fetched automatically; old inbox history is not bulk-imported. No public domain or webhook is required for polling. Back up the storage key separately.
+
+For immediate webhooks later, expose HTTPS and register `/api/webhooks/resend` for `email.received`, `email.delivered`, `email.bounced`, `email.failed`. Save its signing secret. An inactive pipeline returns 503 without acknowledging mail.
 
 ## Start with Docker
 
@@ -37,7 +59,7 @@ Local-password login and local user creation are disabled when managed. The admi
 3. Click Test forbindelse. This retrieves real domain data; it sends no email or DNS change.
 4. Create `test@gleruphub.dk` under Mailkonti and select its owner explicitly.
 
-Keys are AES-256-GCM encrypted in PostgreSQL. Saving a key is not presented as a successful provider test. Receiving remains inactive until its signed-webhook/worker/storage pipeline is implemented and tested. Resend currently controls your MX; leave existing verified records unchanged.
+Keys are AES-256-GCM encrypted in PostgreSQL. Saving a key is not presented as a successful provider test. Receiving is enabled in Maildrift after encrypted storage is configured. Resend currently controls your MX; leave existing verified records unchanged.
 
 ## Development
 

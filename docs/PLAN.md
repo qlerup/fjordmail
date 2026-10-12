@@ -51,3 +51,9 @@ Add a real worker/engine health model, metrics and alerts, encrypted backup/rest
 ## Deferred
 
 AI, external Gmail/Outlook accounts, workflow automation, calendar/contacts and other integration shortcuts. No AI-provider keys, network calls, consent controls or inference jobs are present in 0.1.0.
+
+## Basic mail delivery 0.2.0 (user-narrowed scope)
+
+Completed: real Stalwart accounts and canonical MIME import; text composer/reader; actual Resend send and Sent import; receiving polling without a public domain; signed optional webhooks; durable encrypted jobs/leases/retries; replay deduplication with an indexed engine keyword; membership gates; ClamAV scan; encrypted-mount/PG proof gate. A genuine self-addressed Resend round trip passed.
+
+Remaining: the rest of phase 2, attachment UI, drafts/reply/forward, phase 3 organization/search, IMAP/SMTP, notifications and AI. Extended encryption recovery testing is deferred at the user's request. No live installed app was updated; the user requested GitHub main delivery only.

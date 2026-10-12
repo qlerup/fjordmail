@@ -16,7 +16,7 @@ Use **Stalwart** for phase 2 onward. It has maintained JMAP, IMAP and SMTP imple
 
 Resend is the first edge provider: DNS/MX stays at Resend, not Stalwart. Resend receiving events trigger durable jobs that fetch and import messages. Web outgoing mail uses the Resend API, stable idempotency keys and a reconciled import into canonical Sent. Engine submission/SMTP delivery is a phase-4 integration requiring proof of provider routing and Sent deduplication. Account-specific app-passwords are separate from users' FjordHub passwords; no shared credential is given to clients.
 
-The engine is deliberately not deployed yet: opening IMAP/SMTP before TLS, encrypted storage and sender controls are ready would misrepresent phase 1. Stalwart licensing and features will be pinned/verified against the selected release before adding its image; phase 1 does not depend on proprietary OIDC integration.
+Version 0.2.0 deploys the engine only with the mail profile after storage preparation. Protocol listeners are disabled during setup and no protocol ports are published: opening IMAP/SMTP before TLS, encrypted storage and sender controls are ready would misrepresent phase 1. Stalwart licensing and features will be pinned/verified against the selected release before adding its image; phase 1 does not depend on proprietary OIDC integration.
 
 ## Resend constraints
 

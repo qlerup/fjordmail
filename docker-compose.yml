@@ -3,7 +3,7 @@ services:
   app:
     build: .
     container_name: ${CONTAINER_NAME:-fjordmail}
-    restart: unless-stopped
+    restart: ${MAIL_RESTART_POLICY:-unless-stopped}
     init: true
     stop_grace_period: 30s
     ports:
@@ -19,6 +19,11 @@ services:
       FJORDHUB_APP_ID: fjordmail
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_WEBHOOK_SECRET: ${RESEND_WEBHOOK_SECRET:-}
+      MAIL_ENABLED: ${MAIL_ENABLED:-0}
+      MAIL_STORAGE_ROOT: /mail-storage
+      STALWART_URL: http://engine:8080
+      STALWART_ADMIN_PASSWORD: ${STALWART_ADMIN_PASSWORD:-}
+      RESEND_DOWNLOAD_HOSTS: ${RESEND_DOWNLOAD_HOSTS:-inbound-cdn.resend.com,cdn.resend.app}
       TZ: Europe/Copenhagen
     depends_on:
       db:
@@ -29,14 +34,20 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=32m
     cap_drop: [ALL]
+    volumes:
+      - type: bind
+        source: ${DATA_DIR:-./data}
+        target: /mail-storage
+        bind:
+          create_host_path: false
     security_opt: [no-new-privileges:true]
-    networks: [default, database]
+    networks: [default, database, mail]
     logging:
       driver: json-file
       options: {max-size: 5m, max-file: "2"}
   db:
     image: postgres:17-alpine
-    restart: unless-stopped
+    restart: ${MAIL_RESTART_POLICY:-unless-stopped}
     stop_grace_period: 30s
     environment:
       POSTGRES_DB: fjordmail
@@ -53,6 +64,40 @@ services:
     logging:
       driver: json-file
       options: {max-size: 5m, max-file: "2"}
+  engine:
+    profiles: [mail]
+    image: stalwartlabs/stalwart:v0.16.24
+    restart: ${MAIL_RESTART_POLICY:-unless-stopped}
+    stop_grace_period: 30s
+    environment:
+      STALWART_RECOVERY_ADMIN: admin:${STALWART_ADMIN_PASSWORD:-}
+    volumes:
+      - ${DATA_DIR:-./data}/engine-config:/etc/stalwart
+      - ${DATA_DIR:-./data}/engine-data:/var/lib/stalwart
+    networks: [mail]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /var/log/stalwart:rw,noexec,nosuid,size=16m
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}
+  scanner:
+    profiles: [mail]
+    image: clamav/clamav:1.4
+    restart: ${MAIL_RESTART_POLICY:-unless-stopped}
+    networks: [mail, default]
+    volumes:
+      - ${DATA_DIR:-./data}/clamav:/var/lib/clamav
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}
 networks:
   database:
+    internal: true
+  mail:
     internal: true

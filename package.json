@@ -1,6 +1,6 @@
 {
   "name": "fjordmail",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,17 +16,22 @@
     "express": "^5.1.0",
     "express-rate-limit": "^8.1.0",
     "helmet": "^8.1.0",
+    "nodemailer": "^10.1.0",
     "pg": "^8.16.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "sanitize-html": "^2.18.0",
+    "svix": "^2.8.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
     "@types/node": "^24.0.0",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.15.5",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "@types/sanitize-html": "^2.16.2",
     "@vitejs/plugin-react": "^5.0.0",
     "concurrently": "^9.2.0",
     "eslint": "^10.12.0",
