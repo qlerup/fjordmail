@@ -32,9 +32,22 @@ if [[ $enabled == 1 ]]; then
  # Reuse an existing deployment and preserve an intentional user pause.
  if [[ -f /etc/systemd/system/fjordmail-encrypted-storage.service ]]; then
   active_mount=$(python3 -c "from pathlib import Path;v=dict(l.split('=',1) for l in Path('.env').read_text().splitlines() if '=' in l and not l.startswith('#'));print(v['DATA_DIR'].strip(chr(34)+chr(39)))")
-  if ! findmnt -n -t fuse.gocryptfs -T "$active_mount" >/dev/null; then systemctl start fjordmail-encrypted-storage.service; fi
+  if ! stat "$active_mount/.fjordmail-storage-proof" >/dev/null 2>&1; then
+   echo 'FJORDMAIL_SETUP: Genetablerer den afbrudte krypteringstjeneste. Data slettes ikke.'
+   docker compose stop app db engine scanner
+   systemctl stop fjordmail-encrypted-storage.service || true
+   if findmnt -n -t fuse.gocryptfs -T "$active_mount" >/dev/null; then fusermount3 -uz "$active_mount"; fi
+   systemctl reset-failed fjordmail-encrypted-storage.service || true
+   systemctl start fjordmail-encrypted-storage.service
+  fi
  fi
- docker compose up -d db engine scanner app
+ docker compose up -d --force-recreate --wait --wait-timeout 180 db engine scanner app
+ # Complete bootstrap if the previous installer was interrupted before finishing it.
+ docker compose exec -T app node dist-server/setup-engine.js
+ docker compose restart engine
+ sleep 2
+ docker compose exec -T app node dist-server/setup-engine.js
+ docker compose restart engine
  docker compose exec -T app node --input-type=module -e "const {storageReady}=await import('./dist-server/storage.js');const {db}=await import('./dist-server/db.js');if(!await storageReady())process.exitCode=1;await db.end();"
  echo 'FJORDMAIL_SETUP: Eksisterende krypteret lager er kontrolleret. Data, nøgler og pausevalg er bevaret.'
  exit 0
@@ -46,8 +59,13 @@ if values.get('MAIL_ENABLED')=='1': raise SystemExit('Refusing an already active
 for field in ['POSTGRES_PASSWORD','APP_ENCRYPTION_KEY']:
  if not values.get(field):raise SystemExit('Missing installation secret: '+field)
 PY
-[[ ! -e /etc/systemd/system/fjordmail-encrypted-storage.service && ! -e /etc/systemd/system/fjordmail-basic-mail.service ]] || { echo "Storage services already exist; refusing to overwrite." >&2; exit 1; }
-bash "$app/scripts/prepare-encrypted-storage.sh" "$cipher" "$mount" "$key"
+if [[ -f "$cipher/gocryptfs.conf" && -f "$key" && -f /etc/systemd/system/fjordmail-encrypted-storage.service ]]; then
+ # Resume an interrupted first setup without regenerating its key or ciphertext.
+ systemctl start fjordmail-encrypted-storage.service
+else
+ [[ ! -e /etc/systemd/system/fjordmail-encrypted-storage.service && ! -e /etc/systemd/system/fjordmail-basic-mail.service ]] || { echo "Storage services already exist; refusing to overwrite unrelated configuration." >&2; exit 1; }
+ FJORDMAIL_SYSTEMD_MOUNT=1 bash "$app/scripts/prepare-encrypted-storage.sh" "$cipher" "$mount" "$key"
+fi
 chown 1000:1000 "$mount"
 mkdir -p "$mount/engine-config" "$mount/engine-data" "$mount/clamav"
 chown 2000:2000 "$mount/engine-config" "$mount/engine-data"

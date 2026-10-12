@@ -15,7 +15,26 @@ umask 077
 openssl rand -base64 32 > "$key"
 chmod 600 "$key"
 gocryptfs -q -init -passfile "$key" "$cipher"
-gocryptfs -q -allow_other -passfile "$key" "$cipher" "$plain"
+if [[ ${FJORDMAIL_SYSTEMD_MOUNT:-0} == 1 ]]; then
+ # The daemon must belong to systemd, not the temporary Docker helper cgroup.
+ cat > /etc/systemd/system/fjordmail-encrypted-storage.service <<EOF
+[Unit]
+Description=FjordMail encrypted storage
+After=local-fs.target
+Before=fjordmail-basic-mail.service
+[Service]
+Type=forking
+ExecStart=/usr/bin/gocryptfs -q -allow_other -passfile $key $cipher $plain
+ExecStop=/usr/bin/fusermount3 -u $plain
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+EOF
+ systemctl daemon-reload
+ systemctl start fjordmail-encrypted-storage.service
+else
+ gocryptfs -q -allow_other -passfile "$key" "$cipher" "$plain"
+fi
 mkdir -p -- "$plain/postgres" "$plain/mail"
 chown 70:70 "$plain/postgres"
 chown 1000:1000 "$plain/mail"
