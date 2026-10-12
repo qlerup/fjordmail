@@ -1,0 +1,58 @@
+name: fjordmail
+services:
+  app:
+    build: .
+    container_name: ${CONTAINER_NAME:-fjordmail}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-8101}:8101"
+    environment:
+      DATABASE_URL: postgresql://fjordmail:${POSTGRES_PASSWORD:?Choose POSTGRES_PASSWORD}@db:5432/fjordmail
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Choose APP_ENCRYPTION_KEY}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-0}
+      FIRST_ADMIN_PASSWORD: ${FIRST_ADMIN_PASSWORD:-}
+      FJORDHUB_URL: ${FJORDHUB_URL:-}
+      FJORDHUB_API_KEY: ${FJORDHUB_API_KEY:-}
+      FJORDHUB_APP_ID: fjordmail
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_WEBHOOK_SECRET: ${RESEND_WEBHOOK_SECRET:-}
+      TZ: Europe/Copenhagen
+    depends_on:
+      db:
+        condition: service_healthy
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [default, database]
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      POSTGRES_DB: fjordmail
+      POSTGRES_USER: fjordmail
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Choose POSTGRES_PASSWORD}
+    volumes:
+      - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U fjordmail -d fjordmail"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}
+networks:
+  database:
+    internal: true

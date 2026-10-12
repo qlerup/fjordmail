@@ -1,0 +1,8 @@
+import {migrate,db} from './db.js';
+import {createApp,bootstrap} from './app.js';
+import {env} from './config.js';
+await migrate();await bootstrap();
+const server=createApp().listen(env.PORT,'0.0.0.0',()=>console.log('FjordMail 0.1.0 klar på port '+env.PORT));
+const cleanup=setInterval(()=>db.query('DELETE FROM sessions WHERE expires_at<now()').catch(()=>console.error('session_cleanup_failed')),3600000);cleanup.unref();
+let closing=false;
+for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>{if(closing)return;closing=true;clearInterval(cleanup);server.close(()=>db.end().then(()=>process.exit(0)));setTimeout(()=>process.exit(1),25000).unref();});

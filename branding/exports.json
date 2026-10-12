@@ -1,0 +1,285 @@
+{
+  "name": "FjordMail",
+  "exports": [
+    {
+      "path": "web/public/logos/icon-16.png",
+      "size": [
+        16,
+        16
+      ]
+    },
+    {
+      "path": "web/public/logos/icon-32.png",
+      "size": [
+        32,
+        32
+      ]
+    },
+    {
+      "path": "web/public/logos/icon-48.png",
+      "size": [
+        48,
+        48
+      ]
+    },
+    {
+      "path": "web/public/logos/icon-64.png",
+      "size": [
+        64,
+        64
+      ]
+    },
+    {
+      "path": "web/public/logos/icon-128.png",
+      "size": [
+        128,
+        128
+      ]
+    },
+    {
+      "path": "web/public/logos/icon-192.png",
+      "size": [
+        192,
+        192
+      ]
+    },
+    {
+      "path": "web/public/logos/icon-256.png",
+      "size": [
+        256,
+        256
+      ]
+    },
+    {
+      "path": "web/public/logos/icon-512.png",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "path": "web/public/logos/icon-1024.png",
+      "size": [
+        1024,
+        1024
+      ]
+    },
+    {
+      "path": "web/public/logos/favicon.ico",
+      "size": [
+        256,
+        256
+      ]
+    },
+    {
+      "path": "web/public/logos/apple-touch-icon.png",
+      "size": [
+        180,
+        180
+      ]
+    },
+    {
+      "path": "web/public/logos/app.icns",
+      "size": [
+        1024,
+        1024
+      ]
+    },
+    {
+      "path": "web/public/logos/icon.svg",
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "path": "web/public/logos/maskable-512.png",
+      "size": [
+        512,
+        512
+      ],
+      "background": "#0c343c",
+      "scale": 0.8
+    },
+    {
+      "path": "web/public/logos/fjordmail-horizontal-dark.svg",
+      "size": [
+        1200,
+        300
+      ],
+      "kind": "horizontal",
+      "ink": "#eef8fa",
+      "background": "#10191e"
+    },
+    {
+      "path": "web/public/logos/fjordmail-horizontal-dark.png",
+      "size": [
+        1200,
+        300
+      ],
+      "kind": "horizontal",
+      "ink": "#eef8fa",
+      "background": "#10191e"
+    },
+    {
+      "path": "web/public/logos/fjordmail-horizontal-light.svg",
+      "size": [
+        1200,
+        300
+      ],
+      "kind": "horizontal",
+      "ink": "#17343f",
+      "background": "#f8fbfc"
+    },
+    {
+      "path": "web/public/logos/fjordmail-horizontal-light.png",
+      "size": [
+        1200,
+        300
+      ],
+      "kind": "horizontal",
+      "ink": "#17343f",
+      "background": "#f8fbfc"
+    },
+    {
+      "path": "web/public/logos/fjordmail-horizontal-transparent.svg",
+      "size": [
+        1200,
+        300
+      ],
+      "kind": "horizontal",
+      "ink": "#17343f",
+      "background": null
+    },
+    {
+      "path": "web/public/logos/fjordmail-horizontal-transparent.png",
+      "size": [
+        1200,
+        300
+      ],
+      "kind": "horizontal",
+      "ink": "#17343f",
+      "background": null
+    },
+    {
+      "path": "web/public/logos/fjordmail-stacked-dark.svg",
+      "size": [
+        700,
+        900
+      ],
+      "kind": "stacked",
+      "ink": "#eef8fa",
+      "background": "#10191e"
+    },
+    {
+      "path": "web/public/logos/fjordmail-stacked-dark.png",
+      "size": [
+        700,
+        900
+      ],
+      "kind": "stacked",
+      "ink": "#eef8fa",
+      "background": "#10191e"
+    },
+    {
+      "path": "web/public/logos/fjordmail-stacked-light.svg",
+      "size": [
+        700,
+        900
+      ],
+      "kind": "stacked",
+      "ink": "#17343f",
+      "background": "#f8fbfc"
+    },
+    {
+      "path": "web/public/logos/fjordmail-stacked-light.png",
+      "size": [
+        700,
+        900
+      ],
+      "kind": "stacked",
+      "ink": "#17343f",
+      "background": "#f8fbfc"
+    },
+    {
+      "path": "web/public/logos/fjordmail-stacked-transparent.svg",
+      "size": [
+        700,
+        900
+      ],
+      "kind": "stacked",
+      "ink": "#17343f",
+      "background": null
+    },
+    {
+      "path": "web/public/logos/fjordmail-stacked-transparent.png",
+      "size": [
+        700,
+        900
+      ],
+      "kind": "stacked",
+      "ink": "#17343f",
+      "background": null
+    },
+    {
+      "path": "web/public/logos/fjordmail-social-dark.svg",
+      "size": [
+        1200,
+        630
+      ],
+      "kind": "social",
+      "ink": "#eef8fa",
+      "background": "#10191e"
+    },
+    {
+      "path": "web/public/logos/fjordmail-social-dark.png",
+      "size": [
+        1200,
+        630
+      ],
+      "kind": "social",
+      "ink": "#eef8fa",
+      "background": "#10191e"
+    },
+    {
+      "path": "web/public/logos/fjordmail-social-light.svg",
+      "size": [
+        1200,
+        630
+      ],
+      "kind": "social",
+      "ink": "#17343f",
+      "background": "#f8fbfc"
+    },
+    {
+      "path": "web/public/logos/fjordmail-social-light.png",
+      "size": [
+        1200,
+        630
+      ],
+      "kind": "social",
+      "ink": "#17343f",
+      "background": "#f8fbfc"
+    },
+    {
+      "path": "web/public/logos/fjordmail-social-transparent.svg",
+      "size": [
+        1200,
+        630
+      ],
+      "kind": "social",
+      "ink": "#17343f",
+      "background": null
+    },
+    {
+      "path": "web/public/logos/fjordmail-social-transparent.png",
+      "size": [
+        1200,
+        630
+      ],
+      "kind": "social",
+      "ink": "#17343f",
+      "background": null
+    }
+  ]
+}
