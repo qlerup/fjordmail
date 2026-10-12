@@ -10,23 +10,15 @@ Working basic mail: a text composer, Resend sending, canonical Sent/Inbox in Sta
 
 The live round trip passed against Resend using one email from `test@gleruphub.dk` to itself in an isolated deployment with actual encrypted storage. The extended encrypted-backup recovery drill is deferred at the user's request.
 
-## Enable basic mail after updating FjordHub
+## Automatic FjordHub setup
 
-Updating code alone does not configure encrypted storage. Mail stays paused until a verified gocryptfs mount protects PostgreSQL and Stalwart. For an existing phase-1 installation on a Linux Docker host with gocryptfs, FUSE, Python 3 and systemd, run as root:
+Update **FjordHub first**, then update/install **FjordMail**. FjordHub now invokes the host setup automatically after building the app. It installs the encryption tools, checks FUSE access, prepares encrypted storage, copies existing metadata through an encrypted logical backup, preserves credentials, configures Stalwart/scanner and starts mail processing. Later updates reuse storage and preserve an intentional pause.
 
-```bash
-bash /opt/fjordhub/apps/fjordmail/scripts/enable-basic-mail.sh \
-  /opt/fjordhub/apps/fjordmail \
-  /opt/fjordhub/data/apps/fjordmail-cipher \
-  /opt/fjordhub/data/apps/fjordmail-secure \
-  /opt/fjordhub/keys/fjordmail-storage.key
-```
+No server commands are required for the normal FjordHub workflow. Save and test the Resend API key in Administration. Receiving uses API polling every 30 seconds without a public domain; HTTPS webhooks remain optional.
 
-Adjust paths for a nonstandard installation. The helper refuses existing target contents, retains old database data, saves an encrypted logical backup, preserves APP_ENCRYPTION_KEY, and migrates metadata to the new encrypted store. It briefly stops FjordMail only. It prepares engine/scanner services and boot ordering so mail starts after the encrypted mount. Proxmox LXC needs persistent FUSE support. Failed setup restores the old environment and data location. The helper is syntax-checked; a full deployment/cold-boot/recovery drill is not claimed complete.
+This automatic installer change was pushed **without tests at the user's explicit request**. A host without usable FUSE fails closed and retains the old data/configuration. The earlier basic send/receive flow was genuinely tested; this new provisioning flow has not been validated end to end.
 
-Then open **Administration → Resend**, test the saved API key, and **Maildrift → Aktivér mailbehandling**. New mail is fetched automatically; old inbox history is not bulk-imported. No public domain or webhook is required for polling. Back up the storage key separately.
-
-For immediate webhooks later, expose HTTPS and register `/api/webhooks/resend` for `email.received`, `email.delivered`, `email.bounced`, `email.failed`. Save its signing secret. An inactive pipeline returns 503 without acknowledging mail.
+The manual helper remains for advanced standalone deployments, not the normal FjordHub flow. It requires Linux, Docker, systemd and usable host FUSE. Back up the generated storage key separately. Full encrypted-backup recovery/cold-boot testing remains deferred.
 
 ## Start with Docker
 

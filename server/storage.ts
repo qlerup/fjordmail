@@ -16,4 +16,4 @@ export async function storageReady(){
  }catch{return false;}
 }
 export async function requireStorage(){if(!await storageReady())throw new PublicError(503,'Mailbehandling afventer verificeret krypteret lager. Se Administration → Maildrift.');}
-export async function processingReady(){return await storageReady()&&!!(await db.query('SELECT enabled FROM mail_controls WHERE id=true')).rows[0]?.enabled;}
+export async function processingReady(){return await storageReady()&&!!(await db.query("SELECT enabled FROM mail_controls WHERE id=true AND ($1 OR EXISTS(SELECT 1 FROM provider_settings WHERE id='resend' AND api_key_cipher IS NOT NULL))",[!!env.RESEND_API_KEY])).rows[0]?.enabled;}

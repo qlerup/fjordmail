@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Explicit host setup for an existing phase-1 installation. Old data is preserved.
 set -euo pipefail
+automatic=0
+if [[ ${1:-} == --automatic ]]; then automatic=1; shift; fi
 if [[ $EUID -ne 0 || $# -ne 4 ]]; then
  echo "Run as root: $0 /absolute/app-dir /absolute/cipher-dir /absolute/mount-dir /absolute/key-file" >&2; exit 1
 fi
@@ -9,8 +11,34 @@ for path in "$@"; do
 done
 app=$(realpath -- "$1"); cipher=$(realpath -m -- "$2"); mount=$(realpath -m -- "$3"); key=$(realpath -m -- "$4")
 [[ -f $app/.env && -f $app/docker-compose.yml ]] || { echo "Installed app and private .env required." >&2; exit 1; }
-command -v gocryptfs >/dev/null && command -v python3 >/dev/null && command -v systemctl >/dev/null
 cd "$app"
+if [[ $automatic == 1 ]]; then
+ echo 'FJORDMAIL_SETUP: Kontrollerer Docker-værten og krypteringsværktøjer.'
+ if ! command -v gocryptfs >/dev/null || ! command -v fusermount3 >/dev/null; then
+  apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gocryptfs fuse3
+ fi
+ if [[ ! -e /dev/fuse ]]; then mknod /dev/fuse c 10 229; chmod 666 /dev/fuse; fi
+ python3 - <<'PY'
+import os,stat
+s=os.stat('/dev/fuse')
+assert stat.S_ISCHR(s.st_mode) and (os.major(s.st_rdev),os.minor(s.st_rdev))==(10,229)
+fd=os.open('/dev/fuse',os.O_RDWR);os.close(fd)
+PY
+fi
+command -v gocryptfs >/dev/null && command -v python3 >/dev/null && command -v systemctl >/dev/null
+enabled=$(python3 -c "from pathlib import Path;v=dict(l.split('=',1) for l in Path('.env').read_text().splitlines() if '=' in l and not l.startswith('#'));print(v.get('MAIL_ENABLED','0').strip(chr(34)+chr(39)))")
+if [[ $enabled == 1 ]]; then
+ # Reuse an existing deployment and preserve an intentional user pause.
+ if [[ -f /etc/systemd/system/fjordmail-encrypted-storage.service ]]; then
+  active_mount=$(python3 -c "from pathlib import Path;v=dict(l.split('=',1) for l in Path('.env').read_text().splitlines() if '=' in l and not l.startswith('#'));print(v['DATA_DIR'].strip(chr(34)+chr(39)))")
+  if ! findmnt -n -t fuse.gocryptfs -T "$active_mount" >/dev/null; then systemctl start fjordmail-encrypted-storage.service; fi
+ fi
+ docker compose up -d db engine scanner app
+ docker compose exec -T app node --input-type=module -e "const {storageReady}=await import('./dist-server/storage.js');const {db}=await import('./dist-server/db.js');if(!await storageReady())process.exitCode=1;await db.end();"
+ echo 'FJORDMAIL_SETUP: Eksisterende krypteret lager er kontrolleret. Data, nøgler og pausevalg er bevaret.'
+ exit 0
+fi
 python3 - "$app/.env" <<'PY'
 import sys,pathlib
 values=dict(line.split('=',1) for line in pathlib.Path(sys.argv[1]).read_text().splitlines() if '=' in line and not line.startswith('#'))
@@ -39,6 +67,7 @@ python3 - "$app/.env" "$mount" <<'PY'
 import pathlib,sys,secrets
 p=pathlib.Path(sys.argv[1]);values=dict(line.split('=',1) for line in p.read_text().splitlines() if '=' in line and not line.startswith('#'))
 values.update(DATA_DIR=sys.argv[2],COMPOSE_PROFILES='mail',MAIL_ENABLED='1',MAIL_RESTART_POLICY='on-failure')
+values.setdefault('MAIL_STORAGE_ORIGIN',str(pathlib.Path(sys.argv[2]).with_suffix('')))
 values.setdefault('STALWART_ADMIN_PASSWORD',secrets.token_urlsafe(32))
 if not values['STALWART_ADMIN_PASSWORD']:values['STALWART_ADMIN_PASSWORD']=secrets.token_urlsafe(32)
 p.write_text('\n'.join(k+'='+v for k,v in values.items())+'\n');p.chmod(0o600)
@@ -85,5 +114,11 @@ EOF
 systemctl daemon-reload
 systemctl enable fjordmail-encrypted-storage.service fjordmail-basic-mail.service
 trap - ERR
-echo "Encrypted basic mail installed. Open Administration > Maildrift and activate mail processing."
+if [[ $automatic == 1 ]]; then
+ echo 'FJORDMAIL_SETUP: Aktiverer mailbehandling efter kontrol af krypteret lager.'
+ docker compose exec -T app node --input-type=module -e "const {requireStorage}=await import('./dist-server/storage.js');const {db}=await import('./dist-server/db.js');await requireStorage();await db.query('UPDATE mail_controls SET enabled=true WHERE id=true');await db.end();"
+ echo 'FJORDMAIL_SETUP: Mailopsætningen er færdig. Nye mails hentes automatisk, når Resend-nøglen er gemt.'
+else
+ echo "Encrypted basic mail installed. Open Administration > Maildrift and activate mail processing."
+fi
 echo "Back up the storage key separately. The extended recovery test remains pending."
