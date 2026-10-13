@@ -46,7 +46,7 @@ export async function folders(row:EngineRow){const result=await jmap('Mailbox/ge
  for(const [role,name] of required)if(!list.some(f=>f.role===role)){const made=await jmap('Mailbox/set',{accountId:row.engine_id,create:{folder:{name,role}}},mailboxAuth(row));created(made,'folder');}
  return (await jmap('Mailbox/get',{accountId:row.engine_id},mailboxAuth(row))).list as typeof list;
 }
-export async function upload(row:EngineRow,raw:Buffer){return await (await engineFetch('/jmap/upload/'+encodeURIComponent(row.engine_id),mailboxAuth(row),{method:'POST',headers:{'Content-Type':'message/rfc822'},body:new Uint8Array(raw)})).json() as {blobId:string};}
+export async function upload(row:EngineRow,raw:Buffer,type='message/rfc822'){return await (await engineFetch('/jmap/upload/'+encodeURIComponent(row.engine_id),mailboxAuth(row),{method:'POST',headers:{'Content-Type':type},body:new Uint8Array(raw)})).json() as {blobId:string};}
 export async function findMessage(row:EngineRow,messageId:string){const result=await jmap('Email/query',{accountId:row.engine_id,filter:{hasKeyword:'fm-import-'+messageId},limit:1},mailboxAuth(row));return (result.ids as string[])[0];}
 export async function importMail(row:EngineRow,raw:Buffer,role:string,messageId:string){
  const token=createHmac('sha256',env.APP_ENCRYPTION_KEY).update('import:'+row.id+':'+messageId).digest('hex');

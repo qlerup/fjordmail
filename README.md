@@ -1,6 +1,6 @@
 # FjordMail
 
-Self-hosted FjordHub mail app. **Version 0.2.0 adds basic real sending and receiving.** AI is deferred.
+Self-hosted FjordHub mail app. **Version 0.3.0 adds autosaved drafts, replies, forwarding, CC/BCC and scanned attachments to real sending and receiving.** AI is deferred.
 
 Working now: PostgreSQL migrations, FjordHub login/SSO/first-login confirmation, standalone fallback, persistent personal/shared mailbox metadata and assignments, admin/user boundaries, encrypted Resend configuration, a real domain connectivity test, audit records and a responsive React/TypeScript UI with saved appearance preferences. The complete branded asset package is in `branding/FjordMail-brand-package.zip`.
 
@@ -87,3 +87,11 @@ Back up the encrypted-storage key separately in encrypted/offline recovery stora
 Migrations run transactionally on startup and reject changed previously applied files. New features require new numbered migrations. Before update, take a verified backup; rollback requires a compatible schema or restore to a separate recovery deployment.
 
 See [PLAN.md](docs/PLAN.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [ENCRYPTION.md](docs/ENCRYPTION.md) for phase boundaries, the canonical storage decision and external-client networking without public IPv4.
+
+## Writing mail (0.3.0)
+
+Choose **Ny mail**. Drafts save automatically in the encrypted canonical mail store; **Gem og luk** waits for a successful save. Open a saved draft under **Kladder**. Draft editing belongs to its author, including on shared accounts. Conflicting edits from another tab are rejected instead of overwriting content.
+
+Use **Svar**, **Svar alle** or **Videresend** while reading a message. Reply headers are derived from the original authorized message. CC and BCC are available in the composer. Attach files or drop them into the composer: at most 10 files, 10 MB each, 15 MB combined. Files are malware-scanned before storage, sending and download. Received attachments download as files, never execute inside the reader.
+
+Sending queues a fixed encrypted snapshot with a durable idempotency key. Once queued, the draft cannot be edited or sent twice. Rejected sends retain their draft for correction; ambiguous sends require Maildrift review. The canonical Sent message uses the provider's actual Message-ID for subsequent reply threading. No AI or external-client protocol ports are added by this release.

@@ -1,10 +1,11 @@
 import {randomUUID} from 'node:crypto';
 import {db} from './db.js';
 import {seal,unseal} from './security.js';
-import {processingReady,requireStorage} from './storage.js';
+import {processingReady,requireStorage,storageReady} from './storage.js';
 import {resend,downloadRaw,ProviderError} from './provider.js';
 import {provision,importMail,jmap,mailboxAuth} from './engine.js';
 import {scan} from './scanner.js';
+import {cleanMessageId} from './composition.js';
 
 export async function enqueue(kind:string,key:string,payload:unknown){await db.query('INSERT INTO jobs(kind,dedupe_key,payload) VALUES($1,$2,$3) ON CONFLICT(dedupe_key) DO NOTHING',[kind,key,JSON.stringify({cipher:seal(JSON.stringify(payload))})]);}
 type Job={id:string;kind:string;payload:{cipher:string};attempts:number;lease_token:string;created_at:string};
@@ -28,14 +29,20 @@ async function send(payload:{submissionId:string}){
  const item=(await db.query('SELECT * FROM mail_submissions WHERE id=$1',[payload.submissionId])).rows[0];if(!item)return;
  const data=JSON.parse(unseal(item.payload_cipher));const row=await provision(item.mailbox_id);
  if(!item.provider_id){
+  if(!(await db.query("SELECT 1 FROM mailbox_members WHERE mailbox_id=$1 AND user_id=$2 AND permission='write'",[item.mailbox_id,item.actor_id])).rowCount)throw new Error('access_revoked');
   // Resend idempotency retention is 24 hours. Never blindly resend an ambiguous older request.
   if(Date.now()-new Date(item.created_at).getTime()>23*3600000){await db.query("UPDATE mail_submissions SET state='uncertain',last_error_code='idempotency_expired' WHERE id=$1",[item.id]);throw new Error('idempotency_expired');}
   await requireStorage();const result=await resend('/emails','POST',data.provider,'fjordmail/'+item.id);
   if(!result.id)throw new Error('provider_missing_id');
   await db.query("UPDATE mail_submissions SET provider_id=$1,state='accepted' WHERE id=$2",[result.id,item.id]);item.provider_id=result.id;
  }
- if(!item.sent_id){await requireStorage();const raw=Buffer.from(data.raw,'base64');const id=await importMail(row,raw,'sent',data.messageId);await db.query('UPDATE mail_submissions SET sent_id=$1 WHERE id=$2',[id,item.id]);}
+ if(!item.sent_id){await requireStorage();
+  if(!item.provider_message_id){const info=await resend('/emails/'+encodeURIComponent(item.provider_id));const actual=cleanMessageId(info.message_id);if(!actual)throw new Error('provider_message_id_unavailable');await db.query('UPDATE mail_submissions SET provider_message_id=$1 WHERE id=$2',[actual,item.id]);item.provider_message_id=actual;}
+  const original=Buffer.from(data.raw,'base64');const split=original.indexOf('\r\n\r\n');if(split<0)throw new Error('invalid_mime');
+  const headers=original.subarray(0,split).toString('utf8').replace(/^Message-ID:[^\r\n]*(?:\r\n[ \t][^\r\n]*)*/im,'Message-ID: '+item.provider_message_id);
+  const raw=Buffer.concat([Buffer.from(headers),original.subarray(split)]);const id=await importMail(row,raw,'sent',data.messageId);await db.query('UPDATE mail_submissions SET sent_id=$1 WHERE id=$2',[id,item.id]);}
  if(item.draft_id)await jmap('Email/set',{accountId:row.engine_id,destroy:[item.draft_id]},mailboxAuth(row));
+ if(item.app_draft_id)await db.query("UPDATE mail_drafts SET state='sent',updated_at=now() WHERE id=$1",[item.app_draft_id]);
 }
 async function delivery(payload:{type:string;emailId:string}){
  const state=({'email.delivered':'delivered','email.bounced':'bounced','email.failed':'failed'} as Record<string,string>)[payload.type];if(!state)return;
@@ -58,16 +65,21 @@ async function pollReceiving(){
  throw new Error('provider_poll_page_limit');
 }
 async function step(){
- if(stopping||!await processingReady())return;
- try{await pollReceiving();}catch{console.error('mail_poll_failed');}
- const token=randomUUID();const result=await db.query("WITH next AS (SELECT id FROM jobs WHERE (state='queued' AND available_at<=now()) OR (state='running' AND lease_until<now()) ORDER BY available_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE jobs j SET state='running',lease_until=now()+interval '5 minutes',lease_token=$1,attempts=attempts+1 FROM next WHERE j.id=next.id RETURNING j.*",[token]);
+ if(stopping||!await storageReady())return;const enabled=await processingReady();
+ if(enabled)try{await pollReceiving();}catch{console.error('mail_poll_failed');}
+ const token=randomUUID();const result=await db.query("WITH next AS (SELECT id FROM jobs WHERE ($2::boolean OR kind='draft_cleanup') AND ((state='queued' AND available_at<=now()) OR (state='running' AND lease_until<now())) ORDER BY available_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE jobs j SET state='running',lease_until=now()+interval '5 minutes',lease_token=$1,attempts=attempts+1 FROM next WHERE j.id=next.id RETURNING j.*",[token,enabled]);
  const job=result.rows[0] as Job|undefined;if(!job)return;
  const heartbeat=setInterval(()=>db.query("UPDATE jobs SET lease_until=now()+interval '5 minutes' WHERE id=$1 AND lease_token=$2 AND state='running'",[job.id,token]).catch(()=>{}),30000);heartbeat.unref();
- try{const payload=JSON.parse(unseal(job.payload.cipher));if(job.kind==='receive')await receive(payload);else if(job.kind==='send')await send(payload);else if(job.kind==='delivery')await delivery(payload);else throw new Error('unknown_job');
+ try{const payload=JSON.parse(unseal(job.payload.cipher));if(job.kind==='receive')await receive(payload);else if(job.kind==='send')await send(payload);else if(job.kind==='delivery')await delivery(payload);else if(job.kind==='draft_cleanup'){const row=await provision(payload.mailboxId);const result=await jmap('Email/set',{accountId:row.engine_id,destroy:payload.ids},mailboxAuth(row));const failures=Object.values((result.notDestroyed||{}) as Record<string,{type:string}>);if(failures.some(e=>e.type!=='notFound'))throw new Error('draft_cleanup_failed');}else throw new Error('unknown_job');
   await db.query("UPDATE jobs SET state='done',lease_until=NULL,lease_token=NULL,last_error_code=NULL WHERE id=$1 AND lease_token=$2",[job.id,token]);
- }catch(error){const code=error instanceof ProviderError?'provider_'+error.status:error instanceof Error&&/^[a-z_]+$/.test(error.message)?error.message:'mail_processing_failed';const permanent=code==='malware_found'||code==='idempotency_expired'||error instanceof ProviderError&&[400,401,403,422].includes(error.status);const dead=permanent||job.attempts>=12;
+ }catch(error){const code=error instanceof ProviderError?'provider_'+error.status:error instanceof Error&&/^[a-z_]+$/.test(error.message)?error.message:'mail_processing_failed';const permanent=code==='malware_found'||code==='idempotency_expired'||code==='access_revoked'||error instanceof ProviderError&&[400,401,403,422].includes(error.status);const dead=permanent||job.attempts>=12;
   await db.query("UPDATE jobs SET state=$1,available_at=now()+($2*interval '1 second'),lease_until=NULL,lease_token=NULL,last_error_code=$3 WHERE id=$4 AND lease_token=$5",[dead?'dead':'queued',Math.min(3600,10*2**job.attempts),code,job.id,token]);
-  if(job.kind==='send'&&dead){const payload=JSON.parse(unseal(job.payload.cipher));await db.query("UPDATE mail_submissions SET state=CASE WHEN state='queued' THEN 'failed' ELSE state END,last_error_code=$1 WHERE id=$2",[code,payload.submissionId]);}
+  if(job.kind==='send'&&dead){const payload=JSON.parse(unseal(job.payload.cipher));
+   const rejected=code==='access_revoked'||code==='malware_found'||error instanceof ProviderError&&[400,401,403,422].includes(error.status);
+   await db.query("UPDATE mail_submissions SET state=CASE WHEN state='queued' THEN $1 ELSE state END,last_error_code=$2 WHERE id=$3",[rejected?'failed':'uncertain',code,payload.submissionId]);
+   // Only a definite rejection may unlock a draft. Network failures can hide provider acceptance.
+   if(rejected)await db.query("UPDATE mail_drafts SET state='editing',updated_at=now() WHERE id=(SELECT app_draft_id FROM mail_submissions WHERE id=$1 AND provider_id IS NULL AND state='failed')",[payload.submissionId]);
+  }
   console.error('mail_job_failed',{id:job.id,code});
  }finally{clearInterval(heartbeat);}
 }

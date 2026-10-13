@@ -57,3 +57,9 @@ AI, external Gmail/Outlook accounts, workflow automation, calendar/contacts and 
 Completed: real Stalwart accounts and canonical MIME import; text composer/reader; actual Resend send and Sent import; receiving polling without a public domain; signed optional webhooks; durable encrypted jobs/leases/retries; replay deduplication with an indexed engine keyword; membership gates; ClamAV scan; encrypted-mount/PG proof gate. A genuine self-addressed Resend round trip passed.
 
 Remaining: the rest of phase 2, attachment UI, drafts/reply/forward, phase 3 organization/search, IMAP/SMTP, notifications and AI. Extended encryption recovery testing is deferred at the user's request. No live installed app was updated; the user requested GitHub main delivery only.
+
+## Composition delivery 0.3.0
+
+Completed: canonical encrypted autosaved drafts with owner/version checks; reply/reply-all/forward with original message references; CC/BCC; bounded scanned upload/download and attachment preservation in drafts and Sent; transactional queued draft state; durable old-draft cleanup; provider Message-ID reconciliation.
+
+Remaining phase 2: safe rich HTML view, signatures, extended failure/recovery drills. Phase 3 organization/search, external clients, notifications and AI remain deferred.
