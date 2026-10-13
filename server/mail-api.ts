@@ -3,13 +3,17 @@ import {z} from 'zod';
 import {randomUUID} from 'node:crypto';
 import rateLimit from 'express-rate-limit';
 import {db} from './db.js';
-import {PublicError,seal} from './security.js';
+import {PublicError,seal,unseal} from './security.js';
 import {requireStorage,processingReady,storageReady} from './storage.js';
-import {provision,folders,jmap,mailboxAuth,message,upload,blob,type EngineRow} from './engine.js';
+import {provision,jmap,mailboxAuth,message,upload,blob,type EngineRow} from './engine.js';
 import {providerConfig,verifyEvent} from './provider.js';
 import {enqueue} from './queue.js';
 import {scan} from './scanner.js';
 import {composition,bodyText,descriptor,fileName,buildComposition,mailId,type Part} from './composition.js';
+import {messageHtml,htmlDocument} from './html.js';
+import {operationsRoutes} from './operations.js';
+import {routingRoutes} from './routing.js';
+import {organizationRoutes,querySchema,searchFilter} from './organization.js';
 import {saveDraft,discardDraft,draftContent,ownDraft,type Draft} from './drafts.js';
 
 const uuid=z.string().uuid();
@@ -28,6 +32,8 @@ export async function webhook(req:express.Request,res:express.Response){
 }
 export function mailRoutes(){
  const router=express.Router();
+ router.use(organizationRoutes(access));
+ router.use(routingRoutes(access));
  router.post('/:id/uploads',rateLimit({windowMs:3600000,limit:100,keyGenerator:req=>req.user!.id,standardHeaders:'draft-8',legacyHeaders:false}),express.raw({type:'application/octet-stream',limit:'10mb'}),async(req,res)=>{
   const row=await access(req,true);if(!Buffer.isBuffer(req.body)||req.body.length>10000000)throw new PublicError(400,'Filen skal sendes som filindhold og højst fylde 10 MB.');
   const name=fileName(z.string().min(1).max(255).parse(req.query.name));const type=z.string().max(127).regex(/^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/).default('application/octet-stream').parse(req.query.type);
@@ -42,20 +48,21 @@ export function mailRoutes(){
  router.get('/:id/drafts/:draftId',async(req,res)=>{const row=await access(req,true);const draft=(await db.query('SELECT * FROM mail_drafts WHERE id=$1',[uuid.parse(req.params.draftId)])).rows[0] as Draft|undefined;ownDraft(draft,row,req.user!.id);res.json(await draftContent(row,req.user!.id,draft));});
  router.delete('/:id/drafts/:draftId',async(req,res)=>{const row=await access(req,true);await discardDraft(row,req.user!.id,uuid.parse(req.params.draftId));res.json({ok:true});});
  router.get('/:id/messages',async(req,res)=>{
-  const row=await access(req);const role=z.enum(['inbox','sent','drafts','archive','junk','trash']).default('inbox').parse(req.query.folder);const position=z.coerce.number().int().min(0).max(1000000).default(0).parse(req.query.position);
+  const row=await access(req);const search=querySchema.parse(req.query);const role=search.folder,position=search.position;
   if(role==='drafts'){
    const drafts=(await db.query("SELECT id,engine_message_id FROM mail_drafts WHERE mailbox_id=$1 AND owner_id=$2 AND state='editing' AND engine_message_id IS NOT NULL ORDER BY updated_at DESC LIMIT 50 OFFSET $3",[row.id,req.user!.id,position])).rows;
    const total=(await db.query("SELECT count(*)::int AS total FROM mail_drafts WHERE mailbox_id=$1 AND owner_id=$2 AND state='editing' AND engine_message_id IS NOT NULL",[row.id,req.user!.id])).rows[0].total;
    const result=drafts.length?await jmap('Email/get',{accountId:row.engine_id,ids:drafts.map(d=>d.engine_message_id),properties:['id','subject','from','to','receivedAt','preview','keywords','hasAttachment']},mailboxAuth(row)):{list:[]};
    res.json({items:(result.list as {id:string}[]).map(item=>({...item,draftId:drafts.find(d=>d.engine_message_id===item.id)!.id})),total});return;
   }
-  const list=await folders(row);const box=list.find(f=>f.role===role);if(!box){res.json({items:[],total:0,folders:list});return;}
-  const query=await jmap('Email/query',{accountId:row.engine_id,filter:{inMailbox:box.id},sort:[{property:'receivedAt',isAscending:false}],position,limit:50,calculateTotal:true},mailboxAuth(row));
-  const result=await jmap('Email/get',{accountId:row.engine_id,ids:query.ids,properties:['id','threadId','subject','from','to','receivedAt','preview','keywords','hasAttachment']},mailboxAuth(row));res.json({items:result.list,total:query.total,folders:list});
+  const {boxes:list,filter}=await searchFilter(row,search);if(!filter){res.json({items:[],total:0,folders:list});return;}
+  const query=await jmap('Email/query',{accountId:row.engine_id,filter,sort:[{property:'receivedAt',isAscending:false}],position,limit:50,calculateTotal:true},mailboxAuth(row));
+  const result=await jmap('Email/get',{accountId:row.engine_id,ids:query.ids,properties:['id','threadId','subject','from','to','receivedAt','preview','keywords','hasAttachment']},mailboxAuth(row));const values=result.list as {id:string}[];res.json({items:(query.ids as string[]).map(id=>values.find(v=>v.id===id)).filter(Boolean),total:query.total,folders:list});
  });
+ router.get('/:id/messages/:messageId/html',async(req,res)=>{const row=await access(req);const value=await message(row,mailId.parse(req.params.messageId));const images=req.query.images==='1';res.set({'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; img-src "+(images?"https:":"'none'")+"; frame-ancestors 'self'; base-uri 'none'; form-action 'none'; sandbox allow-popups allow-popups-to-escape-sandbox",'X-Frame-Options':'SAMEORIGIN','Cache-Control':'no-store'}).send(htmlDocument(messageHtml(value),images));});
  router.get('/:id/messages/:messageId',async(req,res)=>{
-  const row=await access(req);const id=z.string().min(1).max(200).parse(req.params.messageId);const value=await message(row,id);
-  res.json({id:value.id,subject:value.subject,from:value.from,to:value.to,cc:value.cc,replyTo:value.replyTo,receivedAt:value.receivedAt,text:bodyText(value),attachments:(value.attachments as Part[]||[]).map(p=>descriptor(row,req.user!.id,p)),keywords:value.keywords});
+  const row=await access(req);const id=z.string().min(1).max(200).parse(req.params.messageId);const value=await message(row,id);const receipt=(await db.query('SELECT authentication_cipher FROM mail_receipts WHERE mailbox_id=$1 AND engine_message_id=$2',[row.id,id])).rows[0];
+  res.json({id:value.id,subject:value.subject,from:value.from,to:value.to,cc:value.cc,bcc:value.bcc,headers:value.headers,threadId:value.threadId,replyTo:value.replyTo,receivedAt:value.receivedAt,text:bodyText(value),hasHtml:!!messageHtml(value),authentication:receipt?.authentication_cipher?JSON.parse(unseal(receipt.authentication_cipher)):null,attachments:(value.attachments as Part[]||[]).map(p=>descriptor(row,req.user!.id,p)),keywords:value.keywords});
  });
  router.post('/:id/send',rateLimit({windowMs:3600000,limit:30,keyGenerator:req=>req.user!.id,standardHeaders:'draft-8',legacyHeaders:false,message:{error:'For mange afsendelser. Prøv igen senere.'}}),async(req,res)=>{
   const row=await access(req,true);if(!await processingReady())throw new PublicError(503,'Aktivér først mailbehandling under Administration → Maildrift.');
@@ -82,7 +89,7 @@ export function mailRoutes(){
  router.get('/:id/submissions/:submissionId',async(req,res)=>{const row=await access(req);const id=uuid.parse(req.params.submissionId);const item=(await db.query('SELECT id,state,last_error_code,sent_id FROM mail_submissions WHERE id=$1 AND mailbox_id=$2 AND actor_id=$3',[id,row.id,req.user!.id])).rows[0];if(!item)throw new PublicError(404,'Afsendelsen findes ikke.');res.json(item);});
  return router;
 }
-export function mailAdminRoutes(){const router=express.Router();
+export function mailAdminRoutes(){const router=express.Router();router.use(operationsRoutes());
  router.get('/',async(_req,res)=>{res.json({storageReady:await storageReady(),enabled:await processingReady(),jobs:(await db.query('SELECT kind,state,count(*) AS count FROM jobs GROUP BY kind,state')).rows,failures:(await db.query("SELECT id,kind,last_error_code,attempts,created_at FROM jobs WHERE state='dead' ORDER BY created_at DESC LIMIT 20")).rows});});
  router.post('/enable',async(_req,res)=>{await requireStorage();const config=await providerConfig();if(!config.key)throw new PublicError(409,'Gem Resend API-nøglen først.');await db.query('UPDATE mail_controls SET enabled=true WHERE id=true');res.json({ok:true});});
  router.post('/pause',async(_req,res)=>{await db.query('UPDATE mail_controls SET enabled=false WHERE id=true');res.json({ok:true});});

@@ -3,6 +3,7 @@ import type {PoolClient} from 'pg';
 import {db} from './db.js';
 import {PublicError,seal,unseal} from './security.js';
 import {message,importMail,type EngineRow} from './engine.js';
+import {messageHtml} from './html.js';
 import {bodyText,descriptor,buildComposition,compositionFingerprint,type Composition,type Part} from './composition.js';
 
 export type Draft={id:string;mailbox_id:string;owner_id:string;engine_message_id:string|null;revision:number;fingerprint:string|null;composition_cipher:string|null;state:string};
@@ -16,7 +17,7 @@ export async function draftContent(row:EngineRow,user:string,draft:Draft){
  const meta=draft.composition_cipher?JSON.parse(unseal(draft.composition_cipher)):{context:null,attachmentIds:[]};
  const addresses=(key:string)=>(value[key] as {email:string}[]||[]).map(v=>v.email);
  const attachments=(value.attachments as Part[]||[]).map((p,i)=>descriptor(row,user,p,meta.attachmentIds[i]||randomUUID()));
- return {id:draft.id,revision:draft.revision,to:addresses('to'),cc:addresses('cc'),bcc:addresses('bcc'),subject:String(value.subject||''),text:bodyText(value),context:meta.context,attachments};
+ return {id:draft.id,from:(value.from as {email:string}[]||[])[0]?.email,replyTo:(value.replyTo as {email:string}[]||[])[0]?.email,revision:draft.revision,to:addresses('to'),cc:addresses('cc'),bcc:addresses('bcc'),subject:String(value.subject||''),text:bodyText(value),html:messageHtml(value)||null,context:meta.context,attachments};
 }
 export async function cleanup(client:PoolClient,row:EngineRow,ids:string[],key:string){
  if(!ids.length)return;

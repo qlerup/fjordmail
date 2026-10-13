@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
+import {RichEditor} from './RichEditor';
 import {requestId,type Api,type Draft,type Upload} from './mail-types';
 
 const addresses=(value:string)=>value.split(/[;,]/).map(v=>v.trim()).filter(Boolean);
@@ -6,6 +7,9 @@ export function Composer({api,upload,mailbox,initial,onClose}:{api:Api;upload:Up
  const [draft,setDraft]=useState(initial),[to,setTo]=useState(initial.to.join(', ')),[cc,setCc]=useState(initial.cc.join(', ')),[bcc,setBcc]=useState(initial.bcc.join(', '));
  const [expanded,setExpanded]=useState(!!initial.cc.length||!!initial.bcc.length),[status,setStatus]=useState(initial.revision?'Kladde gemt':''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[uploading,setUploading]=useState(false),[queued,setQueued]=useState(false);
  const latest=useRef(draft),revision=useRef(initial.revision),saved=useRef(initial.revision?JSON.stringify(initial):''),chain=useRef(Promise.resolve()),pending=useRef<{revision:number;data:Draft;signature:string}|null>(null),active=useRef(true),locked=useRef(false),uploadLock=useRef(false),sendKey=useRef(requestId()),submission=useRef('');
+ const [senders,setSenders]=useState<string[]>([]);
+ useEffect(()=>{api<{senders:string[]}>('/mailboxes/'+mailbox+'/identity').then(v=>setSenders(v.senders||[])).catch(()=>{});},[api,mailbox]);
+ const [rich,setRich]=useState(!!initial.html);
  const fileInput=useRef<HTMLInputElement>(null);
  const oversized=draft.attachments.length>10||draft.attachments.some(f=>f.size>10000000)||draft.attachments.reduce((n,f)=>n+f.size,0)>15000000;
  latest.current={...draft,to:addresses(to),cc:addresses(cc),bcc:addresses(bcc)};
@@ -44,11 +48,11 @@ export function Composer({api,upload,mailbox,initial,onClose}:{api:Api;upload:Up
  }
  return <form className="basic-compose" onSubmit={send} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();void addFiles(e.dataTransfer.files);}}>
   <div className="reader-toolbar"><h2>{initial.context?.mode==='forward'?'Videresend':initial.context?'Svar':'Ny mail'}</h2><span/><button type="button" disabled={busy||uploading} onClick={()=>void close()}>Gem og luk</button></div>
-  <fieldset disabled={busy||queued}><label>Til<input autoFocus value={to} onChange={e=>setTo(e.target.value)} placeholder="navn@domæne.dk" required/></label>
+  <fieldset disabled={busy||queued}>{senders.length>1&&<label>Afsender<select value={draft.from||senders[0]} onChange={e=>setDraft({...draft,from:e.target.value})}>{senders.map(address=><option key={address}>{address}</option>)}</select></label>}<label>Til<input autoFocus value={to} onChange={e=>setTo(e.target.value)} placeholder="navn@domæne.dk" required/></label>
   <button className="text-button" type="button" onClick={()=>setExpanded(!expanded)}>{expanded?'Skjul CC / BCC':'Tilføj CC / BCC'}</button>
   {expanded&&<div className="compose-copy"><label>CC<input value={cc} onChange={e=>setCc(e.target.value)}/></label><label>BCC<input value={bcc} onChange={e=>setBcc(e.target.value)}/></label></div>}
   <label>Emne<input value={draft.subject} onChange={e=>setDraft({...draft,subject:e.target.value})} maxLength={998}/></label>
-  <label>Besked<textarea value={draft.text} onChange={e=>setDraft({...draft,text:e.target.value})} maxLength={40000} rows={12}/></label>
+  <button type="button" disabled={busy||queued} onClick={()=>{setRich(!rich);if(rich)setDraft({...draft,html:null});}}>{rich?'Skift til almindelig tekst':'Formateret tekst'}</button>{rich?<RichEditor html={draft.html||null} text={draft.text} disabled={busy||queued} onChange={(html,text)=>setDraft({...draft,html,text})}/>:<label>Besked<textarea value={draft.text} onChange={e=>setDraft({...draft,text:e.target.value})} maxLength={40000} rows={12}/></label>}
   <div className="attachment-list">{draft.attachments.map(file=><div className="attachment" key={file.id}><span><strong>{file.name}</strong><small>{(file.size/1000000).toLocaleString('da-DK',{maximumFractionDigits:2})} MB</small></span><button type="button" disabled={uploading} aria-label={'Fjern '+file.name} onClick={()=>setDraft({...draft,attachments:draft.attachments.filter(f=>f.id!==file.id)})}>×</button></div>)}</div>
   <input ref={fileInput} className="file-input" type="file" multiple onChange={e=>void addFiles(e.target.files)} aria-label="Vedhæft filer"/>
   <button type="button" disabled={uploading} onClick={()=>fileInput.current?.click()}>{uploading?'Scanner og vedhæfter…':'Vedhæft filer'}</button>

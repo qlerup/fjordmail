@@ -1,6 +1,6 @@
 {
   "name": "fjordmail",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -22,6 +22,7 @@
     "react-dom": "^19.1.0",
     "sanitize-html": "^2.18.0",
     "svix": "^2.8.0",
+    "web-push": "^3.6.7",
     "zod": "^3.25.0"
   },
   "devDependencies": {
@@ -32,6 +33,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@types/sanitize-html": "^2.16.2",
+    "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^5.0.0",
     "concurrently": "^9.2.0",
     "eslint": "^10.12.0",

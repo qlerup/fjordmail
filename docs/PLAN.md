@@ -63,3 +63,11 @@ Remaining: the rest of phase 2, attachment UI, drafts/reply/forward, phase 3 org
 Completed: canonical encrypted autosaved drafts with owner/version checks; reply/reply-all/forward with original message references; CC/BCC; bounded scanned upload/download and attachment preservation in drafts and Sent; transactional queued draft state; durable old-draft cleanup; provider Message-ID reconciliation.
 
 Remaining phase 2: safe rich HTML view, signatures, extended failure/recovery drills. Phase 3 organization/search, external clients, notifications and AI remain deferred.
+
+## Accepted webmail scope 0.4.0
+
+The user explicitly postponed external-client connections and has not chosen a client TLS hostname. AI remains deferred. Phase 4 is therefore not activated by this release.
+
+Implemented: engine-indexed paginated search; flags, folder/label CRUD, moves, archive/trash/spam, permanent deletion guard and batch actions; conversations and headers; rich compose and sandboxed sanitized HTML with opt-in remote images; signatures and sender aliases; aliases, opt-in catch-all, forwarding and ordered sender/subject rules; revalidated SSE; PWA and consented browser/webpush notifications with account selection; component/disk/queue/quarantine status; safe failed-job retry; encrypted cold backup and empty-target restore tooling.
+
+Verified using real isolated encrypted engine/Postgres/API fixtures, including recovery of canonical mail and original-key encrypted preferences after restoring a snapshot. Public HTTPS and physical-device push delivery require deployment configuration and user permission. Daily backup needs a selected destination and an offline age recovery identity. These are setup prerequisites, not automatic claims about the installed system. External clients, external accounts and AI remain excluded.

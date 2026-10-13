@@ -2,7 +2,7 @@
   "id": "fjordmail",
   "name": "FjordMail",
   "tagline": "Din post. Dit overblik.",
-  "description": "Send og modtag mails via Resend. FjordHub klargør krypteret lager og mailmotor automatisk ved installation/opdatering. IMAP/SMTP og AI afventer.",
+  "description": "Webmail med Resend, krypteret lager, søgning, mapper, labels, regler, aliaser og vedhæftninger. FjordHub klargør lager og mailmotor automatisk. Eksterne mailklienter og AI afventer.",
   "icon": "mail",
   "accent": "#57cbd3",
   "container_name": "fjordmail",

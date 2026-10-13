@@ -6,12 +6,17 @@ import {env} from './config.js';
 import {PublicError,seal,unseal} from './security.js';
 import {blob,message,type EngineRow} from './engine.js';
 import {scan} from './scanner.js';
+import {allowedSender} from './routing.js';
+import {safeHtml} from './html.js';
 
-export const mailId=z.string().min(1).max(200).regex(/^[A-Za-z0-9_.-]+$/);
+import {mailId} from './ids.js';
+export {mailId} from './ids.js';
 const email=z.string().email().max(254);
 export const context=z.object({mode:z.enum(['reply','replyAll','forward']),messageId:mailId});
 export const composition=z.object({
+ from:email.optional(),replyTo:email.optional(),
  to:z.array(email).max(20).default([]),cc:z.array(email).max(20).default([]),bcc:z.array(email).max(20).default([]),
+ html:z.string().max(100000).nullable().default(null),
  subject:z.string().max(998).refine(v=>!/[\r\n]/.test(v)),text:z.string().max(40000),
  attachments:z.array(z.object({id:z.string().uuid(),token:z.string().max(6000)})).max(10).default([]),
  context:context.nullable().default(null)
@@ -49,10 +54,11 @@ export async function buildComposition(row:EngineRow,userId:string,data:Composit
   inReplyTo=cleanMessageId((source.messageId as unknown[]|undefined)?.[0])||undefined;
   references=[...new Set([...(source.references as unknown[]||[]),...(source.messageId as unknown[]||[])].map(cleanMessageId).filter((v):v is string=>!!v))].slice(-20);
  }
- const from=row.local_part+'@'+row.domain;
- const mime=new MailComposer({from,to:data.to,cc:data.cc,bcc:data.bcc,subject:data.subject,text:data.text,messageId,inReplyTo,references,date:new Date(),attachments:files,disableFileAccess:true,disableUrlAccess:true}).compile();mime.keepBcc=true;const raw=await mime.build();
+ const html=data.html?safeHtml(data.html):undefined;
+ const from=await allowedSender(row,data.from);
+ const mime=new MailComposer({from,replyTo:data.replyTo,to:data.to,cc:data.cc,bcc:data.bcc,subject:data.subject,text:data.text,html,messageId,inReplyTo,references,date:new Date(),attachments:files,disableFileAccess:true,disableUrlAccess:true}).compile();mime.keepBcc=true;const raw=await mime.build();
  if(raw.length>25000000)throw new PublicError(413,'Den samlede mail er for stor.');
  const headers:Record<string,string>={'Message-ID':messageId};if(inReplyTo)headers['In-Reply-To']=inReplyTo;if(references?.length)headers.References=references.join(' ');
- return {raw,provider:{from,to:data.to,cc:data.cc,bcc:data.bcc,subject:data.subject,text:data.text,headers,attachments:files.map(f=>({filename:f.filename,content:f.content.toString('base64'),content_type:f.contentType}))}};
+ return {raw,provider:{from,reply_to:data.replyTo,to:data.to,cc:data.cc,bcc:data.bcc,subject:data.subject,text:data.text,html,headers,attachments:files.map(f=>({filename:f.filename,content:f.content.toString('base64'),content_type:f.contentType}))}};
 }
 export function compositionFingerprint(data:Composition){return createHmac('sha256',env.APP_ENCRYPTION_KEY).update(JSON.stringify(data)).digest('hex');}

@@ -19,6 +19,9 @@ with sync_playwright() as p:
    if u.endswith('/bootstrap'):data={'managed':False,'ready':True}
    elif u.endswith('/me'):data={'user':{'id':'user','username':'fixture','email':'fixture@example.org','role':'admin','preferences':{}},'csrf':'test-csrf'}
    elif u.endswith('/mailboxes'):data={'items':[{'id':mailbox,'local_part':'fixture','domain':'gleruphub.dk','display_name':'Fixture','kind':'personal','provision_status':'ready'}]}
+   elif u.endswith('/labels'):data={'items':[]}
+   elif u.endswith('/identity'):data={'signature':'','senders':[]}
+   elif '/events' in u:r.fulfill(status=200,content_type='text/event-stream',body=': fixture\n\n');return
    elif '/drafts/' in u:
     id=u.split('/drafts/')[1]
     if method=='PUT':body=r.request.post_data_json;saved[id]=body;data={'id':id,'revision':body['revision']};requests.append(body)
@@ -32,7 +35,10 @@ with sync_playwright() as p:
    elif '/submissions/' in u:data={'state':'accepted','sent_id':'sent-1'}
    else:data={}
    r.fulfill(status=200,content_type='application/json',body=json.dumps(data))
-  page.route('**/api/**',route);page.goto('http://127.0.0.1:18115');page.get_by_role('button',name='Fixture message',exact=False).click();page.get_by_role('button',name='Svar alle',exact=True).click()
+  page.route('**/api/**',route);page.goto('http://127.0.0.1:18115');
+  if width<620:page.get_by_role('button',name='\u00c5bn s\u00f8gning',exact=True).click()
+  page.get_by_label('S\u00f8g i mail',exact=True).fill('fixture');page.wait_for_timeout(500)
+  page.get_by_role('button',name='Fixture message',exact=False).click();page.get_by_role('button',name='Svar alle',exact=True).click()
   assert page.get_by_label('Til',exact=True).input_value()=='sender@example.org, other@example.org'
   page.locator('textarea').fill('Draft retained after close')
   page.get_by_role('button',name='Tilf\u00f8j CC / BCC').click();page.get_by_label('CC',exact=True).fill('cc@example.org');page.get_by_label('BCC',exact=True).fill('bcc@example.org')
@@ -41,6 +47,7 @@ with sync_playwright() as p:
   assert requests[-1]['text']=='Draft retained after close' and requests[-1]['bcc']==['bcc@example.org'] and len(requests[-1]['attachments'])==1
   if width<850:page.get_by_role('button',name='\u00c5bn navigation').click()
   page.get_by_role('button',name='Kladder',exact=True).click();page.get_by_role('button',name='Re: Fixture message',exact=False).click();page.locator('textarea').wait_for();assert page.locator('textarea').input_value()=='Draft retained after close'
+  page.get_by_role('button',name='Formateret tekst',exact=True).click();rich=page.get_by_role('textbox',name='Formateret besked',exact=True);rich.fill('Formatted fixture draft');rich.press('Control+A');page.get_by_role('button',name='Fed',exact=True).click();page.get_by_role('button',name='Gem kladde',exact=True).click();page.get_by_text('Kladde gemt',exact=True).wait_for();assert any('<b>' in r.get('html','') or '<strong>' in r.get('html','') for r in requests if r.get('html'))
   assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
   page.screenshot(path=str(root/'test-results'/f'composer-{width}.png'),full_page=True)
   page.get_by_role('button',name='Send mail',exact=True).click();page.get_by_text('Resend har accepteret mailen. Den er gemt i Sendt.',exact=True).wait_for()

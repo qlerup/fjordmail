@@ -1,6 +1,6 @@
 # FjordMail
 
-Self-hosted FjordHub mail app. **Version 0.3.0 adds autosaved drafts, replies, forwarding, CC/BCC and scanned attachments to real sending and receiving.** AI is deferred.
+Self-hosted FjordHub mail app. **Version 0.4.0 adds complete webmail organization, safe rich mail, rules, aliases, realtime, notifications and encrypted backup/restore tooling.** AI is deferred.
 
 Working now: PostgreSQL migrations, FjordHub login/SSO/first-login confirmation, standalone fallback, persistent personal/shared mailbox metadata and assignments, admin/user boundaries, encrypted Resend configuration, a real domain connectivity test, audit records and a responsive React/TypeScript UI with saved appearance preferences. The complete branded asset package is in `branding/FjordMail-brand-package.zip`.
 
@@ -95,3 +95,17 @@ Choose **Ny mail**. Drafts save automatically in the encrypted canonical mail st
 Use **Svar**, **Svar alle** or **Videresend** while reading a message. Reply headers are derived from the original authorized message. CC and BCC are available in the composer. Attach files or drop them into the composer: at most 10 files, 10 MB each, 15 MB combined. Files are malware-scanned before storage, sending and download. Received attachments download as files, never execute inside the reader.
 
 Sending queues a fixed encrypted snapshot with a durable idempotency key. Once queued, the draft cannot be edited or sent twice. Rejected sends retain their draft for correction; ambiguous sends require Maildrift review. The canonical Sent message uses the provider's actual Message-ID for subsequent reply threading. No AI or external-client protocol ports are added by this release.
+
+## Webmail operations (0.4.0)
+
+- Search uses Stalwart's canonical search index, with sender, recipient, subject, body, dates, read status, attachments, folder and label filters. Lists page 50 messages at a time.
+- Flags, custom folders, labels, archive/trash/spam, batch actions and conversation summaries operate on canonical engine data. Permanent deletion requires Trash; only empty custom folders may be deleted.
+- Rich compose supports formatting and links. Saved HTML is sanitized; reader HTML runs in a sandbox without scripts, forms or CSS trackers. Remote HTTPS images need explicit approval per message.
+- Mail settings contain an encrypted personal signature per mailbox, notification-account selection, forwarding and sender/subject rules. Admins manage aliases and opt-in domain catch-all. Aliases may send only through their assigned mailbox and a provider-approved domain.
+- SSE updates revalidate sessions and memberships; polling remains a fallback. Browser notifications are opt-in. PWA/webpush require HTTPS, permission, and a configured PUBLIC_URL; on iPhone install on the home screen. No messages or private API responses are cached by the service worker. Actual device delivery still depends on those prerequisites.
+- Maildrift reports mount, engine, scanner, worker, disk usage, quarantine, and failed jobs. Unsafe ambiguous sends cannot be manually replayed.
+- [Encrypted backup/restore](docs/BACKUP.md) snapshots ciphertext, database and recovery keys into age, with a cold consistent snapshot, failure-safe restart and an empty-target restore. Choose your backup destination and offline recovery identity before enabling its daily timer.
+
+IMAP/SMTP, external email accounts and AI are deferred at the user's request. This version does not expose client protocol ports or configure a public hostname.
+
+Validation: actual encrypted Stalwart/API checks cover search, flags, folders, labels, rules, aliases, forwarding replay, attachment bytes, mailbox isolation and ambiguous-send safety. An encrypted snapshot was restored into a separate engine/database and verified with original keys, mount proof, canonical mail and encrypted signature data. Browser checks cover desktop/mobile compose; unit tests cover HTML isolation, webhook signatures, SSRF exclusions and cryptography. Webpush delivery on physical devices requires a configured HTTPS deployment and opt-in subscriptions and is not claimed by these fixture tests.

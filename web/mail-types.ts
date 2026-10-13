@@ -1,10 +1,12 @@
+export type Folder={id:string;name:string;role:string|null;totalEmails:number;unreadEmails:number};
+export type Label={id:string;name:string;color:string};
 export type Api=<T=unknown>(path:string,method?:string,body?:unknown)=>Promise<T>;
 export type Address={name:string|null;email:string};
 export type Attachment={id:string;name:string;type:string;size:number;token:string;partId?:string};
 export type Context={mode:'reply'|'replyAll'|'forward';messageId:string}|null;
-export type Draft={id:string;revision:number;to:string[];cc:string[];bcc:string[];subject:string;text:string;attachments:Attachment[];context:Context};
-export type Summary={id:string;draftId?:string;subject:string;from:Address[];to:Address[];receivedAt:string;preview:string;keywords:Record<string,boolean>;hasAttachment:boolean};
-export type Message=Summary&{text:string;cc:Address[];replyTo:Address[];attachments:Attachment[]};
+export type Draft={from?:string;replyTo?:string;id:string;revision:number;to:string[];cc:string[];bcc:string[];subject:string;text:string;html?:string|null;attachments:Attachment[];context:Context};
+export type Summary={id:string;draftId?:string;subject:string;from:Address[];to:Address[];receivedAt:string;preview:string;keywords:Record<string,boolean>;hasAttachment:boolean;threadId?:string};
+export type Message=Summary&{text:string;hasHtml?:boolean;authentication?:Record<string,unknown>|null;cc:Address[];replyTo:Address[];bcc?:Address[];headers?:{name:string;value:string}[];attachments:Attachment[]};
 export type Upload=(mailbox:string,file:File)=>Promise<Attachment>;
 export function requestId(){const bytes=crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;const h=Array.from(bytes,v=>v.toString(16).padStart(2,'0')).join('');return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20);}
 export function emptyDraft():Draft{return {id:requestId(),revision:0,to:[],cc:[],bcc:[],subject:'',text:'',attachments:[],context:null};}

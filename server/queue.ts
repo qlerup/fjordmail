@@ -1,3 +1,6 @@
+import {mkdir,writeFile} from 'node:fs/promises';
+import {env} from './config.js';
+import {digest} from './security.js';
 import {randomUUID} from 'node:crypto';
 import {db} from './db.js';
 import {seal,unseal} from './security.js';
@@ -5,6 +8,9 @@ import {processingReady,requireStorage,storageReady} from './storage.js';
 import {resend,downloadRaw,ProviderError} from './provider.js';
 import {provision,importMail,jmap,mailboxAuth} from './engine.js';
 import {scan} from './scanner.js';
+import {applyRules} from './routing.js';
+import {notifyMailbox} from './push.js';
+import {forwardMail} from './forwarding.js';
 import {cleanMessageId} from './composition.js';
 
 export async function enqueue(kind:string,key:string,payload:unknown){await db.query('INSERT INTO jobs(kind,dedupe_key,payload) VALUES($1,$2,$3) ON CONFLICT(dedupe_key) DO NOTHING',[kind,key,JSON.stringify({cipher:seal(JSON.stringify(payload))})]);}
@@ -13,15 +19,24 @@ async function receive(payload:{emailId:string}){
  const email=await resend('/emails/receiving/'+encodeURIComponent(payload.emailId));
  // Envelope recipients are trusted provider fields, never headers controlled by a sender.
  const recipients=[...new Set([...(email.to||[]),...(email.cc||[]),...(email.bcc||[]),...(email.received_for||[])].filter((v):v is string=>typeof v==='string').map(v=>v.toLowerCase()))];
- const rows=(await db.query('SELECT m.id FROM mailboxes m JOIN domains d ON d.id=m.domain_id WHERE lower(m.local_part||\'@\'||d.name)=ANY($1)',[recipients])).rows;
+ const rows=(await db.query(`SELECT DISTINCT id FROM (
+ SELECT m.id FROM mailboxes m JOIN domains d ON d.id=m.domain_id WHERE lower(m.local_part||'@'||d.name)=ANY($1)
+ UNION SELECT a.mailbox_id AS id FROM mail_aliases a JOIN domains d ON d.id=a.domain_id WHERE lower(a.local_part||'@'||d.name)=ANY($1)
+ UNION SELECT d.catch_all_mailbox_id AS id FROM domains d CROSS JOIN unnest($1::text[]) AS recipient WHERE d.catch_all_mailbox_id IS NOT NULL AND split_part(recipient,'@',2)=d.name
+ AND NOT EXISTS(SELECT 1 FROM mailboxes m WHERE m.domain_id=d.id AND m.local_part=split_part(recipient,'@',1))
+ AND NOT EXISTS(SELECT 1 FROM mail_aliases a WHERE a.domain_id=d.id AND a.local_part=split_part(recipient,'@',1))
+ ) recipients`,[recipients])).rows;
  if(!rows.length)return; // Catch-all is deliberately disabled; no unauthorized account is created.
  if(!email.raw?.download_url)throw new Error('provider_raw_unavailable');
- const raw=await downloadRaw(email.raw.download_url);await scan(raw);
+ const raw=await downloadRaw(email.raw.download_url);try{await scan(raw);}catch(error){if(error instanceof Error&&error.message==='malware_found'){await requireStorage();const filename=digest(payload.emailId)+'.eml';await mkdir(env.MAIL_STORAGE_ROOT+'/quarantine',{recursive:true,mode:0o700});await writeFile(env.MAIL_STORAGE_ROOT+'/quarantine/'+filename,raw,{mode:0o600});await db.query('INSERT INTO mail_quarantine(provider_id,filename) VALUES($1,$2) ON CONFLICT DO NOTHING',[payload.emailId,filename]);}throw error;}
  for(const value of rows){
   if((await db.query('SELECT 1 FROM mail_receipts WHERE mailbox_id=$1 AND provider_id=$2',[value.id,payload.emailId])).rowCount)continue;
   await requireStorage();const row=await provision(value.id);
   const messageId='<'+payload.emailId+'@resend.invalid>';
   const id=await importMail(row,raw,'inbox',messageId);
+  await applyRules(row,id);
+  await enqueue('notify','notify:'+row.id+':'+payload.emailId,{mailboxId:row.id});
+  await enqueue('forward','forward:'+row.id+':'+payload.emailId,{mailboxId:row.id,messageId:id,providerId:payload.emailId});
   await db.query('INSERT INTO mail_receipts(mailbox_id,provider_id,engine_message_id,authentication_cipher) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[row.id,payload.emailId,id,seal(JSON.stringify(email.authentication||{}))]);
  }
 }
@@ -65,12 +80,12 @@ async function pollReceiving(){
  throw new Error('provider_poll_page_limit');
 }
 async function step(){
- if(stopping||!await storageReady())return;const enabled=await processingReady();
+ if(stopping)return;await db.query('INSERT INTO mail_worker_status(id,updated_at) VALUES(true,now()) ON CONFLICT(id) DO UPDATE SET updated_at=now()');if(!await storageReady())return;const enabled=await processingReady();
  if(enabled)try{await pollReceiving();}catch{console.error('mail_poll_failed');}
  const token=randomUUID();const result=await db.query("WITH next AS (SELECT id FROM jobs WHERE ($2::boolean OR kind='draft_cleanup') AND ((state='queued' AND available_at<=now()) OR (state='running' AND lease_until<now())) ORDER BY available_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE jobs j SET state='running',lease_until=now()+interval '5 minutes',lease_token=$1,attempts=attempts+1 FROM next WHERE j.id=next.id RETURNING j.*",[token,enabled]);
  const job=result.rows[0] as Job|undefined;if(!job)return;
  const heartbeat=setInterval(()=>db.query("UPDATE jobs SET lease_until=now()+interval '5 minutes' WHERE id=$1 AND lease_token=$2 AND state='running'",[job.id,token]).catch(()=>{}),30000);heartbeat.unref();
- try{const payload=JSON.parse(unseal(job.payload.cipher));if(job.kind==='receive')await receive(payload);else if(job.kind==='send')await send(payload);else if(job.kind==='delivery')await delivery(payload);else if(job.kind==='draft_cleanup'){const row=await provision(payload.mailboxId);const result=await jmap('Email/set',{accountId:row.engine_id,destroy:payload.ids},mailboxAuth(row));const failures=Object.values((result.notDestroyed||{}) as Record<string,{type:string}>);if(failures.some(e=>e.type!=='notFound'))throw new Error('draft_cleanup_failed');}else throw new Error('unknown_job');
+ try{const payload=JSON.parse(unseal(job.payload.cipher));if(job.kind==='receive')await receive(payload);else if(job.kind==='send')await send(payload);else if(job.kind==='notify')await notifyMailbox(payload);else if(job.kind==='forward')await forwardMail(payload);else if(job.kind==='delivery')await delivery(payload);else if(job.kind==='draft_cleanup'){const row=await provision(payload.mailboxId);const result=await jmap('Email/set',{accountId:row.engine_id,destroy:payload.ids},mailboxAuth(row));const failures=Object.values((result.notDestroyed||{}) as Record<string,{type:string}>);if(failures.some(e=>e.type!=='notFound'))throw new Error('draft_cleanup_failed');}else throw new Error('unknown_job');
   await db.query("UPDATE jobs SET state='done',lease_until=NULL,lease_token=NULL,last_error_code=NULL WHERE id=$1 AND lease_token=$2",[job.id,token]);
  }catch(error){const code=error instanceof ProviderError?'provider_'+error.status:error instanceof Error&&/^[a-z_]+$/.test(error.message)?error.message:'mail_processing_failed';const permanent=code==='malware_found'||code==='idempotency_expired'||code==='access_revoked'||error instanceof ProviderError&&[400,401,403,422].includes(error.status);const dead=permanent||job.attempts>=12;
   await db.query("UPDATE jobs SET state=$1,available_at=now()+($2*interval '1 second'),lease_until=NULL,lease_token=NULL,last_error_code=$3 WHERE id=$4 AND lease_token=$5",[dead?'dead':'queued',Math.min(3600,10*2**job.attempts),code,job.id,token]);

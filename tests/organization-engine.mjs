@@ -1,0 +1,44 @@
+// Isolated encrypted Stalwart/API fixture only. No Resend key or real deliveries.
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {createRequire} from 'node:module';
+const require=createRequire('/app/package.json');const MailComposer=require('nodemailer/lib/mail-composer');
+const {db}=await import('/app/dist-server/db.js');
+const {provision,importMail,message}=await import('/app/dist-server/engine.js');
+const {applyRules,allowedSender}=await import('/app/dist-server/routing.js');
+const {forwardMail}=await import('/app/dist-server/forwarding.js');
+const {seal,passwordHash}=await import('/app/dist-server/security.js');
+assert.equal(process.env.FJORDMAIL_ISOLATED_TEST,'1');
+const base='http://127.0.0.1:8101';let cookie='',csrf='';
+async function call(path,method='GET',body,session){const r=await fetch(base+'/api'+path,{method,headers:{Origin:base,Cookie:session?.cookie||cookie,'X-CSRF-Token':session?.csrf||csrf,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});const text=await r.text();let data;try{data=JSON.parse(text);}catch{data=text;}return {status:r.status,data,cookie:r.headers.get('set-cookie')?.split(';')[0],headers:r.headers};}
+try{
+ assert.equal((await db.query("SELECT count(*)::int AS n FROM provider_settings WHERE api_key_cipher IS NOT NULL")).rows[0].n,0);
+ const login=await call('/auth/login','POST',{username:'admin',password:process.env.FIRST_ADMIN_PASSWORD});assert.equal(login.status,200);cookie=login.cookie;const me=await call('/me');csrf=me.data.csrf;
+ const box=(await db.query("SELECT m.id,m.domain_id FROM mailboxes m JOIN domains d ON d.id=m.domain_id WHERE m.local_part='fixture' AND d.name='gleruphub.dk'")).rows[0];const row=await provision(box.id),path='/mailboxes/'+row.id,unique=randomUUID();
+ const parent='<organization-'+unique+'@example.org>';
+ const raw=await new MailComposer({from:'sender@example.org',to:'fixture@gleruphub.dk',subject:'Organization '+unique,text:'Searchable fixture phrase '+unique,html:'<p>HTML fixture</p><script>evil()</script><img src="https://example.org/tracker.png">',messageId:parent}).compile().build();
+ const first=await importMail(row,raw,'inbox','organization:'+unique);const replyRaw=await new MailComposer({from:'sender@example.org',to:'fixture@gleruphub.dk',subject:'Re: Organization '+unique,text:'Reply fixture',inReplyTo:parent,references:[parent],messageId:'<reply-'+unique+'@example.org>'}).compile().build();const second=await importMail(row,replyRaw,'inbox','organization-reply:'+unique);
+ const query=await call(path+'/messages?folder=inbox&q='+encodeURIComponent('Searchable fixture phrase'));assert.equal(query.status,200);assert(query.data.items.some(v=>v.id===first),'Engine full-text search');
+ const read=await call(path+'/messages/'+first);assert.equal(read.status,200);assert(read.data.hasHtml);assert(read.data.headers.some(h=>h.name.toLowerCase()==='message-id'));
+ const thread=await call(path+'/threads/'+read.data.threadId);assert.equal(thread.status,200);assert(thread.data.items.some(v=>v.id===first)&&thread.data.items.some(v=>v.id===second));
+ const eventsAbort=new AbortController();const stream=await fetch(base+'/api'+path+'/events',{headers:{Cookie:cookie},signal:eventsAbort.signal});assert.equal(stream.status,200);assert(stream.headers.get('content-type').includes('text/event-stream'));const chunk=await stream.body.getReader().read();assert(Buffer.from(chunk.value).toString().includes('event: mail'));eventsAbort.abort();
+ const html=await call(path+'/messages/'+first+'/html');assert.equal(html.status,200);assert(!html.data.includes('<script'));assert(!html.data.includes('<img'));assert(html.headers.get('content-security-policy').includes("img-src 'none'"));const images=await call(path+'/messages/'+first+'/html?images=1');assert(images.data.includes('<img'));assert(!images.data.includes('<script'));
+ assert.equal((await call(path+'/actions','POST',{ids:[first,second],action:'read'})).status,200);assert((await message(row,first)).keywords.$seen);
+ assert.equal((await call(path+'/actions','POST',{ids:[first],action:'unread'})).status,200);assert(!(await message(row,first)).keywords.$seen);
+ assert.equal((await call(path+'/actions','POST',{ids:[first],action:'star'})).status,200);assert((await call(path+'/messages?folder=starred')).data.items.some(v=>v.id===first));
+ const folder=await call(path+'/folders','POST',{name:'Fixture '+unique});assert.equal(folder.status,201,JSON.stringify(folder.data));const folderId=folder.data.items.find(f=>f.name==='Fixture '+unique).id;
+ const label=await call(path+'/labels','POST',{name:'Fixture '+unique,color:'#75d5dc'});assert.equal(label.status,201);
+ assert.equal((await call(path+'/actions','POST',{ids:[first],action:'move',folderId})).status,200);assert((await call(path+'/messages?folderId='+folderId)).data.items.some(v=>v.id===first));assert.equal((await call(path+'/folders/'+folderId,'DELETE')).status,409);
+ assert.equal((await call(path+'/actions','POST',{ids:[first],action:'label',labelId:label.data.id})).status,200);assert((await call(path+'/messages?folderId='+folderId+'&label='+label.data.id)).data.items.some(v=>v.id===first));
+ assert.equal((await call(path+'/actions','POST',{ids:[first],action:'delete'})).status,409);
+ assert.equal((await call(path+'/identity','PUT',{signature:'Fixture signature'})).status,200);assert.equal((await call(path+'/identity')).data.signature,'Fixture signature');
+ const aliasName='fixture-'+unique;const alias=await call('/admin/aliases','POST',{domainId:box.domain_id,localPart:aliasName,mailboxId:box.id});assert.equal(alias.status,201);assert.equal(await allowedSender(row,aliasName+'@gleruphub.dk'),aliasName+'@gleruphub.dk');await assert.rejects(()=>allowedSender(row,'forbidden@example.org'),e=>e.status===403);
+ const rule=await call(path+'/rules','POST',{name:'Fixture rule',match:{subject:unique},action:{folderId,labelId:label.data.id}});assert.equal(rule.status,201);await applyRules(row,second);const ruled=await message(row,second);assert(ruled.mailboxIds[folderId]);assert(ruled.keywords['fm-label-'+label.data.id]);
+ assert.equal((await call(path+'/forwarding','PUT',{enabled:true,recipient:'fixture-destination@example.org'})).status,200);const forwarding={mailboxId:box.id,messageId:first,providerId:'fixture-'+unique};await forwardMail(forwarding);await forwardMail(forwarding);assert.equal((await db.query('SELECT count(*)::int AS n FROM mail_submissions WHERE source_key=$1',['forward:'+box.id+':fixture-'+unique])).rows[0].n,1);
+ await call(path+'/forwarding','PUT',{enabled:false,recipient:'fixture-destination@example.org'});
+ const outsider='outsider-'+unique;await db.query('INSERT INTO users(username,email,role,password_hash) VALUES($1,$2,$3,$4)',[outsider,'outsider@example.org','user',await passwordHash('Isolated-fixture-password-123!')]);const otherLogin=await call('/auth/login','POST',{username:outsider,password:'Isolated-fixture-password-123!'});const session={cookie:otherLogin.cookie};const otherMe=await call('/me','GET',undefined,session);session.csrf=otherMe.data.csrf;assert.equal((await call(path+'/folders','GET',undefined,session)).status,404);assert.equal((await call(path+'/actions','POST',{ids:[first],action:'trash'},session)).status,404);assert.equal((await call('/admin/aliases','GET',undefined,session)).status,403);
+ const jobId=randomUUID(),submissionId=randomUUID();await db.query("INSERT INTO mail_submissions(id,mailbox_id,actor_id,request_key,draft_id,payload_cipher,state) VALUES($1,$2,$3,$4,'',$5,'uncertain')",[submissionId,box.id,me.data.user.id,randomUUID(),seal('{}')]);await db.query("INSERT INTO jobs(id,kind,dedupe_key,payload,state,last_error_code) VALUES($1,'send',$2,$3,'dead','idempotency_expired')",[jobId,'fixture-uncertain:'+unique,JSON.stringify({cipher:seal(JSON.stringify({submissionId}))})]);assert.equal((await call('/admin/mail/jobs/'+jobId+'/retry','POST',{})).status,409);
+ const readiness=await call('/admin/mail/readiness');assert.equal(readiness.status,200,JSON.stringify(readiness.data));assert(readiness.data.storage&&readiness.data.engine&&readiness.data.scanner);
+ assert.equal((await call(path+'/actions','POST',{ids:[first,second],action:'trash'})).status,200);assert.equal((await call(path+'/actions','POST',{ids:[first,second],action:'delete'})).status,200);assert.equal((await call(path+'/folders/'+folderId,'DELETE')).status,200);await call(path+'/rules/'+rule.data.id,'DELETE');await call(path+'/labels/'+label.data.id,'DELETE');await call('/admin/aliases/'+alias.data.id,'DELETE');
+ console.log('PASS real engine full-text search, flags, labels, folders/moves, MIME HTML isolation, rules, aliases, forwarding replay, user isolation, uncertain-send guard, component readiness');
+}finally{await db.end();}
