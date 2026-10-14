@@ -44,6 +44,14 @@ export function createApp(){
  });
  app.get(['/hub-login','/sso'],limit,async(req,res)=>{if(!managed)throw new PublicError(400,'FjordHub-login er ikke aktiveret.');const token=z.string().min(20).max(512).parse(req.query.token);const profile=await hubCall('/api/hub/sso-verify',{token},'GET');const user=await syncHubUser(profile);await session(res,user);res.redirect('/');});
  app.use('/api',authenticate);
+ app.get('/api/auth/access',(_req,res)=>res.json({authenticated:true}));
+ app.post('/api/auth/email',async(req,res)=>{
+  if(!managed||!req.user!.hub_id)throw new PublicError(403,'FjordHub-login er ikke aktiveret.');
+  const data=z.object({email:z.string().max(254)}).parse(req.body);
+  const result=await hubCall(`/api/hub/apps/users/${req.user!.hub_id}/email`,data);
+  if(result.accepted===true)await syncHubUser(result.user);
+  res.json(result);
+ });
  app.get('/api/me',(req,res)=>{res.json({user:{id:req.user!.id,username:req.user!.username,email:req.user!.email,role:req.user!.role,preferences:req.user!.preferences},csrf:req.csrf});});
  app.post('/api/auth/logout',async(req,res)=>{await db.query('DELETE FROM sessions WHERE token_hash=$1',[digest(cookie(req))]);res.clearCookie('fjordmail_session',{path:'/',secure:env.COOKIE_SECURE==='1',httpOnly:true,sameSite:'lax'});res.json({ok:true});});
  app.patch('/api/me/preferences',async(req,res)=>{const data=preferences.parse(req.body);await db.query('UPDATE users SET preferences=preferences||$1::jsonb WHERE id=$2',[JSON.stringify(data),req.user!.id]);res.json({ok:true});});

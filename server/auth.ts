@@ -11,10 +11,11 @@ export async function session(res:Response,user:User){const token=randomBytes(32
 export function cookie(req:Request){return req.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith('fjordmail_session='))?.slice(18)||'';}
 export async function syncHubUser(value:unknown){const user=hubIdentity.parse(value);if(user.email_required||user.must_change_password)throw new PublicError(403,'Afslut første login med email og personlig adgangskode.');
  return (await db.query("INSERT INTO users(hub_id,username,email,role) VALUES($1,$2,$3,$4) ON CONFLICT(hub_id) DO UPDATE SET username=excluded.username,email=excluded.email,role=excluded.role RETURNING id,hub_id,username,email,role,preferences",[user.id,user.username,user.email||'',user.role])).rows[0] as User;}
-export async function authenticate(req:Request,_res:Response,next:NextFunction){
+export async function authenticate(req:Request,res:Response,next:NextFunction){
  const result=await db.query('SELECT u.id,u.hub_id,u.username,u.email,u.role,u.preferences,s.csrf FROM sessions s JOIN users u ON u.id=s.user_id WHERE token_hash=$1 AND expires_at>now()',[digest(cookie(req))]);
  const row=result.rows[0];if(!row)throw new PublicError(401,'Log ind for at fortsætte.');
- if(managed){const items=(await hubCall('/api/hub/apps/users',{},'GET')).items;const current=Array.isArray(items)?items.find((u:Record<string,unknown>)=>u.id===Number(row.hub_id)):undefined;if(!current){await db.query('DELETE FROM sessions WHERE user_id=$1',[row.id]);throw new PublicError(401,'Din appadgang er fjernet.');}const profile=hubIdentity.parse(current);if(profile.must_change_password||profile.email_required)throw new PublicError(401,'Afslut første login igen.');row.role=profile.role;}
+ if(managed){const items=(await hubCall('/api/hub/apps/users',{},'GET')).items;const current=Array.isArray(items)?items.find((u:Record<string,unknown>)=>u.id===Number(row.hub_id)):undefined;if(!current){await db.query('DELETE FROM sessions WHERE user_id=$1',[row.id]);throw new PublicError(401,'Din appadgang er fjernet.');}const profile=hubIdentity.parse(current);if(profile.must_change_password)throw new PublicError(401,'Afslut første login igen.');row.role=profile.role;
+  if(profile.email_required&&!['/api/auth/email','/api/auth/logout'].includes(req.originalUrl.split('?')[0])){res.status(403).json({ok:false,authenticated:true,email_required:true,error_code:'email_update_required',csrf_token:row.csrf,error:'Bekræft eller opdater din email for at fortsætte.'});return;}}
  req.user=row;req.csrf=row.csrf;
  if(!['GET','HEAD'].includes(req.method)&&req.headers['x-csrf-token']!==row.csrf)throw new PublicError(403,'Sikkerhedskontrollen fejlede. Genindlæs siden.');next();
 }
