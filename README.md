@@ -4,11 +4,11 @@ Self-hosted FjordHub mail app. **Version 0.4.0 adds complete webmail organizatio
 
 Working now: PostgreSQL migrations, FjordHub login/SSO/first-login confirmation, standalone fallback, persistent personal/shared mailbox metadata and assignments, admin/user boundaries, encrypted Resend configuration, a real domain connectivity test, audit records and a responsive React/TypeScript UI with saved appearance preferences. The complete branded asset package is in `branding/FjordMail-brand-package.zip`.
 
-Working basic mail: a text composer, Resend sending, canonical Sent/Inbox in Stalwart, a text reader, signed optional webhooks, automatic receiving API polling every 30 seconds, persistent encrypted jobs with leases/retries and import deduplication. Receiving MIME is scanned with ClamAV before import. Mail access requires explicit mailbox membership; administrative status never grants implicit reading.
+Mail delivery uses Resend, canonical storage in Stalwart, signed optional webhooks, receiving API polling every 30 seconds, persistent encrypted jobs with leases/retries and import deduplication. Receiving MIME is scanned with ClamAV before import. Mail access requires explicit mailbox membership; administrative status never grants implicit reading.
 
-**Draft autosave, reply/forward, attachment upload/download, organizing/search, IMAP/SMTP, notifications and AI remain future work.** Received attachments stay in the original MIME but cannot yet be opened in the UI. This is the limited basic-mail release requested for tonight.
+Implemented webmail includes encrypted autosaved drafts, reply/reply-all/forward, CC/BCC, scanned attachment upload/download, safe rich composition, search, folders/labels, batch actions, conversations, signatures, rules, forwarding, aliases, realtime updates and opt-in notifications. See the operations sections below. **IMAP/SMTP client access, external email accounts and AI remain deferred.** No external-client protocol ports are exposed.
 
-The live round trip passed against Resend using one email from `test@gleruphub.dk` to itself in an isolated deployment with actual encrypted storage. The extended encrypted-backup recovery drill is deferred at the user's request.
+An isolated live Resend round trip and an encrypted snapshot restore into a separate engine/database have been checked. These fixtures do not prove every host's cold-boot recovery or physical-device notification delivery.
 
 ## Automatic FjordHub setup
 
@@ -16,9 +16,9 @@ Update **FjordHub first**, then update/install **FjordMail**. FjordHub now invok
 
 No server commands are required for the normal FjordHub workflow. Save and test the Resend API key in Administration. Receiving uses API polling every 30 seconds without a public domain; HTTPS webhooks remain optional.
 
-This automatic installer change was pushed **without tests at the user's explicit request**. A host without usable FUSE fails closed and retains the old data/configuration. The earlier basic send/receive flow was genuinely tested; this new provisioning flow has not been validated end to end.
+Provisioning fails closed if host FUSE is unusable and retains existing data/configuration. Mail fixtures and backup checks do not constitute an end-to-end verification of the automated installer on every host.
 
-The manual helper remains for advanced standalone deployments, not the normal FjordHub flow. It requires Linux, Docker, systemd and usable host FUSE. Back up the generated storage key separately. Full encrypted-backup recovery/cold-boot testing remains deferred.
+The manual helper remains for advanced standalone deployments. It requires Linux, Docker, systemd and usable host FUSE. Back up the generated storage key separately and verify recovery/cold-boot behavior on the actual host. The systemd mount keeper and recovery tooling handle disconnected storage; startup must restore and verify encryption before database containers are recreated.
 
 ## Start with Docker
 
@@ -34,7 +34,7 @@ Open `http://localhost:8101`. Username is `admin`; read the generated FIRST_ADMI
 
 For another machine on the LAN set BIND_ADDRESS to the server's LAN IP and use that IP in the browser. When exposed through HTTPS set PUBLIC_URL and COOKIE_SECURE=1. PostgreSQL is reachable only on the private database Docker network. `docker compose stop` stops services without removing persistent data. Do not remove DATA_DIR during update.
 
-DATA_DIR defaults to `./data` for local development and is **not automatically encrypted**. Before real mail use, provision and verify encrypted storage using [the encryption guide](docs/ENCRYPTION.md). The app itself needs no privileged containers or Docker socket. No IMAP/SMTP ports are exposed in phase 1.
+DATA_DIR defaults to `./data` for local development and is **not automatically encrypted** in standalone mode. Before real mail use, provision and verify encrypted storage using [the encryption guide](docs/ENCRYPTION.md) and [backup/recovery guide](docs/BACKUP.md). The app itself needs no privileged containers or Docker socket. No IMAP/SMTP client ports are exposed.
 
 ## FjordHub
 
@@ -44,14 +44,16 @@ FjordHub supplies FJORDHUB_URL, FJORDHUB_API_KEY and FJORDHUB_APP_ID. Assign eac
 
 Local-password login and local user creation are disabled when managed. The admin user list synchronizes Hub members who have finished onboarding. Mailbox owners/members are selected explicitly.
 
+Hub administrators can require email confirmation/update on next opening. Returning to the app checks existing sessions and shows a mandatory email form before private APIs can be used. A valid, unique address is saved centrally; completion clears the requirement across updated apps without deleting the session. Update both Hub and Mail. Mailbox membership remains a separate requirement and is not granted by updating an account email.
+
 ## Resend preparation
 
-1. Add `gleruphub.dk` under Administration → Domæner.
+1. Add your provider-approved domain under Administration → Domains; isolated examples used `gleruphub.dk`.
 2. Save a full-access Resend API key under Resend; save the webhook signing secret when available.
-3. Click Test forbindelse. This retrieves real domain data; it sends no email or DNS change.
-4. Create `test@gleruphub.dk` under Mailkonti and select its owner explicitly.
+3. Click Test connection. This retrieves real domain data; it sends no email or DNS change.
+4. Create a mailbox under Mail accounts and select its owner explicitly; use a dedicated test address for verification.
 
-Keys are AES-256-GCM encrypted in PostgreSQL. Saving a key is not presented as a successful provider test. Receiving is enabled in Maildrift after encrypted storage is configured. Resend currently controls your MX; leave existing verified records unchanged.
+Keys are AES-256-GCM encrypted in PostgreSQL. Saving a key is not presented as a successful provider test. Enable receiving in Mail operations after encrypted storage is configured. Verify the provider's existing domain/MX configuration instead of assuming every deployment uses the example domain.
 
 ## Development
 
@@ -75,7 +77,7 @@ The integration fixture uses a separate empty test Compose project/database, nev
 
 ## Backup and restore
 
-Back up logical PostgreSQL data plus `.env`/encryption keys in an authenticated encrypted repository; mail-store backup is added with Stalwart. Example using an already initialized encrypted Restic repository and RESTIC_PASSWORD_FILE:
+Back up PostgreSQL, the canonical Stalwart mail store and original environment/recovery keys. The coordinated [encrypted backup tool](docs/BACKUP.md) creates a consistent stopped snapshot, encrypts it with age, restarts safely and restores only to an empty target. Restoring only PostgreSQL does not restore messages. The following commands can supplement that complete backup with a logical database dump and environment copy in an already initialized encrypted Restic repository using RESTIC_PASSWORD_FILE:
 
 ```bash
 docker compose exec -T db pg_dump -U fjordmail -Fc fjordmail | restic backup --stdin --stdin-filename fjordmail-postgres.dump
@@ -90,11 +92,11 @@ See [PLAN.md](docs/PLAN.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [ENCRYP
 
 ## Writing mail (0.3.0)
 
-Choose **Ny mail**. Drafts save automatically in the encrypted canonical mail store; **Gem og luk** waits for a successful save. Open a saved draft under **Kladder**. Draft editing belongs to its author, including on shared accounts. Conflicting edits from another tab are rejected instead of overwriting content.
+Choose **New mail**. Drafts save automatically in the encrypted canonical mail store; **Save and close** waits for a successful save. Open a saved draft under **Drafts**. Draft editing belongs to its author, including on shared accounts. Conflicting edits from another tab are rejected instead of overwriting content.
 
-Use **Svar**, **Svar alle** or **Videresend** while reading a message. Reply headers are derived from the original authorized message. CC and BCC are available in the composer. Attach files or drop them into the composer: at most 10 files, 10 MB each, 15 MB combined. Files are malware-scanned before storage, sending and download. Received attachments download as files, never execute inside the reader.
+Use **Reply**, **Reply all** or **Forward** while reading a message. Reply headers are derived from the original authorized message. CC and BCC are available in the composer. Attach files or drop them into the composer: at most 10 files, 10 MB each, 15 MB combined. Files are malware-scanned before storage, sending and download. Received attachments download as files, never execute inside the reader.
 
-Sending queues a fixed encrypted snapshot with a durable idempotency key. Once queued, the draft cannot be edited or sent twice. Rejected sends retain their draft for correction; ambiguous sends require Maildrift review. The canonical Sent message uses the provider's actual Message-ID for subsequent reply threading. No AI or external-client protocol ports are added by this release.
+Sending queues a fixed encrypted snapshot with a durable idempotency key. Once queued, the draft cannot be edited or sent twice. Rejected sends retain their draft for correction; ambiguous sends require Mail operations review. The canonical Sent message uses the provider's actual Message-ID for subsequent reply threading. No AI or external-client protocol ports are added by this release.
 
 ## Webmail operations (0.4.0)
 
@@ -103,7 +105,7 @@ Sending queues a fixed encrypted snapshot with a durable idempotency key. Once q
 - Rich compose supports formatting and links. Saved HTML is sanitized; reader HTML runs in a sandbox without scripts, forms or CSS trackers. Remote HTTPS images need explicit approval per message.
 - Mail settings contain an encrypted personal signature per mailbox, notification-account selection, forwarding and sender/subject rules. Admins manage aliases and opt-in domain catch-all. Aliases may send only through their assigned mailbox and a provider-approved domain.
 - SSE updates revalidate sessions and memberships; polling remains a fallback. Browser notifications are opt-in. PWA/webpush require HTTPS, permission, and a configured PUBLIC_URL; on iPhone install on the home screen. No messages or private API responses are cached by the service worker. Actual device delivery still depends on those prerequisites.
-- Maildrift reports mount, engine, scanner, worker, disk usage, quarantine, and failed jobs. Unsafe ambiguous sends cannot be manually replayed.
+- Mail operations reports mount, engine, scanner, worker, disk usage, quarantine, and failed jobs. Unsafe ambiguous sends cannot be manually replayed.
 - [Encrypted backup/restore](docs/BACKUP.md) snapshots ciphertext, database and recovery keys into age, with a cold consistent snapshot, failure-safe restart and an empty-target restore. Choose your backup destination and offline recovery identity before enabling its daily timer.
 
 IMAP/SMTP, external email accounts and AI are deferred at the user's request. This version does not expose client protocol ports or configure a public hostname.
